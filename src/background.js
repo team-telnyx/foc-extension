@@ -237,6 +237,22 @@ function fetchOrderFromPageContext(srId) {
         }
       }
       
+      // Bare time fallback: no TZ abbreviation found, but "X AM/PM" exists in comment text
+      // Assume it's local time for the detected country
+      if (!fullComment && country) {
+        // Look for a time like "8:00 AM" or "10 AM" in a sentence that mentions
+        // carrier confirmation, FOC, or release — signals it's a local time
+        var bareTimeRe = new RegExp('[^.!?]*\\d{1,2}(?::\\d{2})?\\s*(?:AM|PM)[^.!?]*', 'i');
+        var bareTimeMatch = rawText.match(bareTimeRe);
+        if (bareTimeMatch) {
+          // Only use if the sentence looks like it's about FOC/porting timing
+          var sentence = bareTimeMatch[0];
+          if (/(?:confirmation|confirm|FOC|release|port|trigger|carrier|schedule)/i.test(sentence)) {
+            fullComment = sentence + ' LT';  // Append LT so parseLocalTimeFromComment matches it
+          }
+        }
+      }
+      
       // Search for duration info in comments
       // Common patterns: "2 hours to release", "30 minutes to release", "3 hrs to complete"
       var durMatch = rawText.match(/(\d+)\s*(?:hours?|hrs?|minutes?|mins?)\s+(?:to\s+)?(?:release|complete|process|port|trigger)/i);
