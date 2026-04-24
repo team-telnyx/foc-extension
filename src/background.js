@@ -31,11 +31,12 @@ async function lookupAndRead(srId) {
     debug.push('got data, focDate=' + (tabResult.focDate || 'null'));
     if (tabResult.focDate) {
       // ── LT → CST comparison ──
-      var ltTime = parseLocalTimeFromComment(tabResult.comment);
+      var ltSource = tabResult.fullComment || tabResult.comment;
+      var ltTime = parseLocalTimeFromComment(ltSource);
       if (ltTime && tabResult.country) {
         var comparison = compareLtWithFoc(tabResult.focDate, ltTime, tabResult.country);
         tabResult.ltComparison = comparison;
-        debug.push('LT comparison: ' + (comparison.match === true ? 'MATCH' : comparison.match === false ? 'MISMATCH' : 'N/A'));
+        debug.push('LT comparison: ' + (comparison.match === true ? 'MATCH' : comparison.match === false ? 'MISMATCH' : 'N/A') + ' (' + ltSource.substring(0, 60) + ')');
       }
       return { order: tabResult, debug };
     }
@@ -190,6 +191,28 @@ function fetchOrderFromPageContext(srId) {
       var uuidMatch = window.location.hash.match(/sub-request\/([a-f0-9-]{36})\/([a-f0-9-]{36})/i);
       var uuids = uuidMatch ? { portRequestId: uuidMatch[1], subRequestId: uuidMatch[2] } : null;
       var comment = '';
+      var fullComment = '';  // Full comment text for LT time parsing
+      
+      // Try to get the full comment/note text from the page
+      // Comments are usually in a dedicated section with comment text
+      var commentElements = document.querySelectorAll('.comment-text, .note-text, [ng-if*="comment"], [ng-bind*="comment"]');
+      for (var cei = 0; cei < commentElements.length; cei++) {
+        var cText = (commentElements[cei].textContent || '').trim();
+        if (cText.length > comment.length && /\d+\s*(am|pm)\s*lt/i.test(cText)) {
+          fullComment = cText;
+          break;
+        }
+      }
+      
+      // If no dedicated element, search the full page text for LT time patterns
+      if (!fullComment) {
+        // Look for the sentence containing "X AM/PM LT"
+        var ltSentence = rawText.match(/[^.!?]*\d{1,2}(?::\d{2})?\s*(?:AM|PM)\s*LT[^.!?]*[.!?]/i);
+        if (ltSentence) {
+          fullComment = ltSentence[0];
+        }
+      }
+      
       // Search for duration info in comments
       // Common patterns: "2 hours to release", "30 minutes to release", "3 hrs to complete"
       var durMatch = rawText.match(/(\d+)\s*(?:hours?|hrs?|minutes?|mins?)\s+(?:to\s+)?(?:release|complete|process|port|trigger)/i);
@@ -220,7 +243,7 @@ function fetchOrderFromPageContext(srId) {
       var descSearch = rawText.match(/\b([A-Z]{2})\s+(local|national|international|tollfree|mobile)\b/i);
       debugLog.push('country regex on full text: ' + (descSearch ? descSearch[0] : 'NO MATCH'));
 
-      var result = { srId: srNum, country: country, focDate: focDate, comment: comment, status: null };
+      var result = { srId: srNum, country: country, focDate: focDate, comment: comment, fullComment: fullComment, status: null };
       
       // ── Read the order status badge from the detail page ──
       // The status appears as a badge next to "Sub Request sr_xxx"
@@ -554,7 +577,7 @@ const COUNTRY_TIMEZONES = {
 
 function parseLocalTimeFromComment(comment) {
   if (!comment) return null;
-  // Patterns: "10 AM LT", "3:00 PM LT", "at 10 AM LT", "10am LT"
+  // Patterns: "10 AM LT", "3:00 PM LT", "at 10 AM LT", "10am LT", "1/4/26 at 10 AM LT trigger"
   var match = comment.match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)\s*LT/i);
   if (!match) return null;
   var hour = parseInt(match[1]);
