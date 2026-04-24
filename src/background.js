@@ -250,97 +250,114 @@ function fetchOrderFromPageContext(srId) {
     await new Promise(function(r) { setTimeout(r, 5000); });
     debugLog.push('navigated to queue (all statuses), hash: ' + window.location.hash.substring(0, 80));
 
-    // ─── Step 1b: Ensure "All" status filter is selected ──────────────
-    // The status filter is a dropdown ("4 Items Selected") with options inside.
-    // We need to open it and click "All".
-    await new Promise(function(r) { setTimeout(r, 1000); });
+    // ─── Step 1b: Select "All" status filter via dropdown ──────────
+    // The Queue page has a "Status:" label with a dropdown bar below it
+    // (shows e.g. "4 Items Selected"). We need to:
+    //   1. Click the dropdown bar to open it
+    //   2. Click "All" inside the dropdown
+    await new Promise(function(r) { setTimeout(r, 1500); });
     var allFilterClicked = false;
     
-    // Diagnostic: log what's on the page
-    var allCheckboxes = document.querySelectorAll('input[type="checkbox"], input[type="radio"]');
-    debugLog.push('found ' + allCheckboxes.length + ' std checkboxes');
-    
-    // Also log md-checkbox and other Angular Material elements
-    var mdCheckboxes = document.querySelectorAll('md-checkbox, [role="checkbox"], [role="option"]');
-    debugLog.push('found ' + mdCheckboxes.length + ' md-checkbox/role elements');
+    // Diagnostic: log md-checkbox and role elements on the page
+    var mdCheckboxes = document.querySelectorAll('md-checkbox, [role="checkbox"], [role="option"], md-select-menu, md-content');
+    debugLog.push('found ' + mdCheckboxes.length + ' md/role elements');
     var mdDebug = [];
-    for (var mdi = 0; mdi < Math.min(mdCheckboxes.length, 15); mdi++) {
-      var mdTxt = (mdCheckboxes[mdi].textContent || '').trim().substring(0, 30);
-      var mdAria = mdCheckboxes[mdi].getAttribute('aria-checked') || '';
-      mdDebug.push('#' + mdi + ':' + mdTxt + ' aria=' + mdAria);
+    for (var mdi = 0; mdi < Math.min(mdCheckboxes.length, 10); mdi++) {
+      mdDebug.push('#' + mdi + ':' + (mdCheckboxes[mdi].textContent || '').trim().substring(0, 20));
     }
-    debugLog.push('md elements: ' + mdDebug.join(' | '));
+    debugLog.push('md sample: ' + mdDebug.join(' | '));
     
-    // Strategy A: Find and click the Status dropdown trigger ("4 Items Selected" or similar)
-    // Then click the "All" option inside
+    // Step 1: Find the "Status:" label, then find the dropdown bar below it
+    var statusDropdownBtn = null;
     var allEls = document.querySelectorAll('*');
-    var statusDropdown = null;
+    
+    // Approach: find elements whose text matches "N Items Selected" or "Item Selected"
+    // These are likely the dropdown trigger buttons
     for (var sdi = 0; sdi < allEls.length; sdi++) {
       var sdText = (allEls[sdi].textContent || '').trim();
-      if (/^\d+\s+items?\s+selected$/i.test(sdText) || sdText.toLowerCase() === 'status') {
-        // This might be the dropdown trigger — click it to open
-        statusDropdown = allEls[sdi];
-        debugLog.push('found status dropdown candidate: "' + sdText.substring(0, 30) + '" tag=' + allEls[sdi].tagName);
+      var sdTag = allEls[sdi].tagName.toLowerCase();
+      // Match the dropdown bar text like "4 Items Selected" or "1 Item Selected"
+      if (/^\d+\s+items?\s+selected$/i.test(sdText) && sdTag !== 'body' && sdTag !== 'html') {
+        statusDropdownBtn = allEls[sdi];
+        debugLog.push('found dropdown btn: "' + sdText + '" tag=' + sdTag + ' class=' + (allEls[sdi].className || '').substring(0, 30));
         break;
       }
     }
     
-    if (statusDropdown) {
-      // Click to open the dropdown
-      statusDropdown.click();
-      await new Promise(function(r) { setTimeout(r, 1000); });
+    // Fallback: look for a md-select element or [role="listbox"] near "Status"
+    if (!statusDropdownBtn) {
+      var mdSelects = document.querySelectorAll('md-select, [role="listbox"], [role="combobox"]');
+      debugLog.push('found ' + mdSelects.length + ' md-select/listbox elements');
+      for (var msi = 0; msi < mdSelects.length; msi++) {
+        // Check if it's near a "Status" label
+        var nearText = '';
+        var parent = mdSelects[msi].parentElement;
+        for (var pwi = 0; pwi < 3; pwi++) {
+          if (parent) { nearText += ' ' + (parent.textContent || '').substring(0, 50); parent = parent.parentElement; }
+        }
+        if (/status/i.test(nearText)) {
+          statusDropdownBtn = mdSelects[msi];
+          debugLog.push('found md-select near Status: ' + (mdSelects[msi].textContent || '').trim().substring(0, 30));
+          break;
+        }
+      }
+    }
+    
+    if (statusDropdownBtn) {
+      // Click the dropdown bar to open it
+      statusDropdownBtn.click();
+      await new Promise(function(r) { setTimeout(r, 1500); });
       debugLog.push('clicked status dropdown to open it');
       
-      // Now find and click "All" option
-      var optEls = document.querySelectorAll('md-option, [role="option"], [role="checkbox"], .md-option, li, div');
+      // Step 2: Find and click "All" inside the now-open dropdown
+      // The dropdown panel might be in md-select-menu, md-content, or a new overlay
+      // Try multiple selectors to find the "All" option
+      var allOptionSelectors = [
+        'md-option', 'md-checkbox', '[role="option"]', '[role="checkbox"]',
+        '.md-option', 'li', 'div.md-list-item'
+      ];
+      var allSelector = allOptionSelectors.join(', ');
+      var optEls = document.querySelectorAll(allSelector);
+      debugLog.push('found ' + optEls.length + ' option elements in dropdown');
+      
       for (var oi = 0; oi < optEls.length; oi++) {
-        var optText = (optEls[oi].textContent || '').trim();
-        if (optText.toLowerCase() === 'all') {
+        var optText = (optEls[oi].textContent || '').trim().toLowerCase();
+        // Match "All" — the option text might have whitespace
+        if (optText === 'all' || optText.startsWith('all')) {
           optEls[oi].click();
           allFilterClicked = true;
-          debugLog.push('clicked All option in dropdown (tag=' + optEls[oi].tagName + ')');
+          debugLog.push('clicked All option (tag=' + optEls[oi].tagName + ' text="' + (optEls[oi].textContent || '').trim().substring(0, 20) + '")');
           break;
         }
       }
       
       if (!allFilterClicked) {
-        debugLog.push('could not find All option in opened dropdown');
+        // The dropdown options might not use standard selectors
+        // Try finding "All" in any newly-appeared element
+        debugLog.push('standard options not found, scanning all elements for All...');
+        var freshEls = document.querySelectorAll('*');
+        for (var fei = 0; fei < freshEls.length; fei++) {
+          var feText = (freshEls[fei].textContent || '').trim();
+          var feTag = freshEls[fei].tagName.toLowerCase();
+          // Only match leaf-ish elements (not containers with lots of text)
+          if (feText.toLowerCase() === 'all' && feTag !== 'body' && feTag !== 'html' && feTag !== 'div' && feTag !== 'section') {
+            freshEls[fei].click();
+            allFilterClicked = true;
+            debugLog.push('clicked All leaf element: <' + feTag + '>');
+            break;
+          }
+        }
       }
       
-      // Close dropdown by pressing Escape or clicking elsewhere
+      // Close the dropdown by pressing Escape or clicking elsewhere
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
       await new Promise(function(r) { setTimeout(r, 500); });
-    }
-    
-    // Strategy B: If no dropdown found, try clicking "All" directly on page
-    if (!allFilterClicked) {
-      for (var aei = 0; aei < allEls.length; aei++) {
-        var aeText = (allEls[aei].textContent || '').trim();
-        var aeTag = allEls[aei].tagName.toLowerCase();
-        if (aeText.toLowerCase() === 'all' && aeTag !== 'body' && aeTag !== 'html') {
-          allEls[aei].click();
-          allFilterClicked = true;
-          debugLog.push('clicked All element directly: <' + aeTag + '>');
-          break;
-        }
-      }
-    }
-    
-    // Strategy C: Check md-checkbox elements that contain "All"
-    if (!allFilterClicked) {
-      for (var mci = 0; mci < mdCheckboxes.length; mci++) {
-        var mcText = (mdCheckboxes[mci].textContent || '').trim();
-        if (mcText.toLowerCase() === 'all' || mcText.toLowerCase().startsWith('all')) {
-          mdCheckboxes[mci].click();
-          allFilterClicked = true;
-          debugLog.push('clicked md-checkbox All');
-          break;
-        }
-      }
+    } else {
+      debugLog.push('could not find status dropdown bar');
     }
     
     if (!allFilterClicked) {
-      debugLog.push('WARNING: could not click All filter — relying on URL params only');
+      debugLog.push('WARNING: All filter not clicked — relying on URL params only');
     }
     await new Promise(function(r) { setTimeout(r, 1500); });
 
