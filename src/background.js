@@ -34,10 +34,11 @@ async function lookupAndRead(srId) {
       var ltSource = tabResult.fullComment || tabResult.comment;
       if (tabResult._uuids && tabResult._uuids.subRequestId) {
         try {
-          var apiComments = await fetchLatestCommentViaApi(tabResult._uuids);
-          if (apiComments) {
-            debug.push('API comment: ' + apiComments.substring(0, 300));
-            ltSource = apiComments;  // Prefer API-sourced latest comment
+          var apiResult = await fetchLatestCommentViaApi(tabResult._uuids);
+          if (apiResult.debug) debug.push.apply(debug, apiResult.debug);
+          if (apiResult.text) {
+            debug.push('API comment used: ' + apiResult.text.substring(0, 300));
+            ltSource = apiResult.text;  // Prefer API-sourced latest comment
           }
         } catch (e) {
           debug.push('API comment fetch failed: ' + e.message);
@@ -712,18 +713,16 @@ const TZ_ABBREV = {
 // Uses the sub-request UUID to call the API and get the most recent comment.
 // This avoids parsing rawText which contains ALL old comments.
 async function fetchLatestCommentViaApi(uuids) {
-  // We need cookies from portingadmin.telnyx.com to authenticate
-  // The API endpoint for sub-request comments
+  // Returns { text, debug } where debug is an array of log strings
   var subUuid = uuids.subRequestId;
   var portUuid = uuids.portRequestId;
-  if (!subUuid) return null;
+  var apiDebug = [];
+  if (!subUuid) return { text: null, debug: apiDebug };
   
   // Try the sub-request comments endpoint
   var apiUrl = 'https://api-internal.telnyx.com/api/porting/v1/sub_requests/' + subUuid + '/comments';
   
   try {
-    // Get cookies from portingadmin.telnyx.com
-    var cookieUrl = 'https://portingadmin.telnyx.com';
     var cookies = await chrome.cookies.getAll({ domain: '.telnyx.com' });
     var cookieHeader = cookies.map(function(c) { return c.name + '=' + c.value; }).join('; ');
     
@@ -733,9 +732,9 @@ async function fetchLatestCommentViaApi(uuids) {
         'Cookie': cookieHeader,
         'Accept': 'application/json',
         'Content-Type': 'application/json'
-      },
-      credentials: 'include'
+      }
     });
+    apiDebug.push('API status: ' + resp.status + ' url: ' + apiUrl.substring(0, 80));
     
     if (!resp.ok) {
       // Try alternate endpoint pattern
@@ -746,31 +745,33 @@ async function fetchLatestCommentViaApi(uuids) {
           'Cookie': cookieHeader,
           'Accept': 'application/json',
           'Content-Type': 'application/json'
-        },
-        credentials: 'include'
+        }
       });
+      apiDebug.push('API alt status: ' + resp.status);
     }
     
-    if (!resp.ok) return null;
+    if (!resp.ok) return { text: null, debug: apiDebug };
     
     var data = await resp.json();
+    apiDebug.push('API resp keys: ' + Object.keys(data).join(','));
+    
     // Comments are usually in data.data or data as an array
     var comments = data.data || data;
-    if (!Array.isArray(comments) || comments.length === 0) return null;
-    
-    // Log the API response structure for debugging
-    console.log('[FOC] API comments count:', comments.length);
-    if (comments.length > 0) {
-      console.log('[FOC] First comment keys:', Object.keys(comments[0]).join(', '));
-      console.log('[FOC] First comment sample:', JSON.stringify(comments[0]).substring(0, 200));
-      console.log('[FOC] Last comment sample:', JSON.stringify(comments[comments.length - 1]).substring(0, 200));
+    if (!Array.isArray(comments) || comments.length === 0) {
+      apiDebug.push('API no comments array');
+      return { text: null, debug: apiDebug };
     }
+    
+    apiDebug.push('API comments count: ' + comments.length);
+    apiDebug.push('API first keys: ' + Object.keys(comments[0]).join(','));
+    apiDebug.push('API first: ' + JSON.stringify(comments[0]).substring(0, 150));
+    apiDebug.push('API last: ' + JSON.stringify(comments[comments.length - 1]).substring(0, 150));
     
     // Sort by created_at descending to get the latest
     comments.sort(function(a, b) {
       var aTime = a.created_at || a.createdAt || a.created_at_date || '';
       var bTime = b.created_at || b.createdAt || b.created_at_date || '';
-      if (!aTime && !bTime) return 0;  // Can't sort without dates
+      if (!aTime && !bTime) return 0;
       return new Date(bTime || 0) - new Date(aTime || 0);
     });
     
@@ -778,9 +779,10 @@ async function fetchLatestCommentViaApi(uuids) {
     var hasDateField = comments.some(function(c) { return c.created_at || c.createdAt || c.created_at_date; });
     var latest = hasDateField ? comments[0] : comments[comments.length - 1];
     
-    console.log('[FOC] Selected latest comment (hasDateField=' + hasDateField + '):', (latest.body || latest.text || latest.content || latest.comment || '').substring(0, 200));
+    var text = latest.body || latest.text || latest.content || latest.comment || null;
+    apiDebug.push('API selected (hasDate=' + hasDateField + '): ' + (text || '').substring(0, 200));
     
-    return latest.body || latest.text || latest.content || latest.comment || null;
+    return { text: text, debug: apiDebug };
   } catch (e) {
     return null;
   }
