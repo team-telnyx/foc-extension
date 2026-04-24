@@ -573,11 +573,66 @@ const COUNTRY_TIMEZONES = {
   SA: 'Asia/Riyadh',      // Saudi Arabia
 };
 
+// ─── Timezone Abbreviation → IANA Map ─────────────────────────────────────────
+
+const TZ_ABBREV = {
+  // Europe
+  CET:  'Europe/Paris',       // Central European Time (winter)
+  CEST: 'Europe/Amsterdam',   // Central European Summer Time
+  WET:  'Europe/Lisbon',       // Western European Time (winter)
+  WEST: 'Europe/Lisbon',       // Western European Summer Time
+  EET:  'Europe/Athens',       // Eastern European Time (winter)
+  EEST: 'Europe/Athens',       // Eastern European Summer Time
+  GMT:  'Europe/London',       // Greenwich Mean Time (winter)
+  BST:  'Europe/London',       // British Summer Time
+  IST:  'Europe/Dublin',       // Irish Standard Time (summer)
+  MET:  'Europe/Paris',        // Middle European Time
+  MEST: 'Europe/Paris',       // Middle European Summer Time
+  // Asia-Pacific
+  AEST: 'Australia/Sydney',    // Australian Eastern Standard/Summer Time
+  AEDT: 'Australia/Sydney',    // Australian Eastern Daylight Time
+  ACST: 'Australia/Adelaide', // Australian Central Standard/Summer Time
+  ACDT: 'Australia/Adelaide', // Australian Central Daylight Time
+  AWST: 'Australia/Perth',    // Australian Western Standard Time
+  NZST: 'Pacific/Auckland',   // New Zealand Standard Time
+  NZDT: 'Pacific/Auckland',   // New Zealand Daylight Time
+  SGT:  'Asia/Singapore',     // Singapore Time
+  HKT:  'Asia/Hong_Kong',     // Hong Kong Time
+  JST:  'Asia/Tokyo',         // Japan Standard Time
+  KST:  'Asia/Seoul',         // Korea Standard Time
+  TWT:  'Asia/Taipei',        // Taiwan Time
+  CST:  'Asia/Shanghai',      // China Standard Time (note: different from US CST)
+  IST_IN: 'Asia/Kolkata',     // India Standard Time
+  PHT:  'Asia/Manila',        // Philippine Time
+  ICT:  'Asia/Bangkok',       // Indochina Time
+  MYT:  'Asia/Kuala_Lumpur',  // Malaysia Time
+  // Africa / Middle East
+  SAST: 'Africa/Johannesburg', // South Africa Standard Time
+  GST:  'Asia/Dubai',         // Gulf Standard Time
+  IST_IL: 'Asia/Jerusalem',   // Israel Standard Time
+  AST:  'Asia/Riyadh',        // Arabia Standard Time
+};
+
 // ─── LT → CST Comparison ──────────────────────────────────────────────────────
 
 function parseLocalTimeFromComment(comment) {
   if (!comment) return null;
-  // Patterns: "10 AM LT", "3:00 PM LT", "at 10 AM LT", "10am LT", "1/4/26 at 10 AM LT trigger"
+  // Try timezone abbreviations first: "10 AM AEST", "3:00 PM CEST", "10am JST"
+  var abbrevs = Object.keys(TZ_ABBREV).sort(function(a, b) { return b.length - a.length; }); // longest first
+  for (var ai = 0; ai < abbrevs.length; ai++) {
+    var ab = abbrevs[ai];
+    var re = new RegExp('(\\d{1,2})(?::(\\d{2}))?\\s*(AM|PM)\\s*' + ab, 'i');
+    var match = comment.match(re);
+    if (match) {
+      var hour = parseInt(match[1]);
+      var minute = match[2] ? parseInt(match[2]) : 0;
+      var ampm = match[3].toUpperCase();
+      if (ampm === 'PM' && hour !== 12) hour += 12;
+      if (ampm === 'AM' && hour === 12) hour = 0;
+      return { hour: hour, minute: minute, tzAbbr: ab, tzIana: TZ_ABBREV[ab] };
+    }
+  }
+  // Fallback: "LT" (Local Time) — will use detected country for timezone
   var match = comment.match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)\s*LT/i);
   if (!match) return null;
   var hour = parseInt(match[1]);
@@ -585,7 +640,7 @@ function parseLocalTimeFromComment(comment) {
   var ampm = match[3].toUpperCase();
   if (ampm === 'PM' && hour !== 12) hour += 12;
   if (ampm === 'AM' && hour === 12) hour = 0;
-  return { hour: hour, minute: minute };
+  return { hour: hour, minute: minute, tzAbbr: 'LT' };
 }
 
 function getTzOffsetDiff(countryTz, year, month, day) {
@@ -610,11 +665,13 @@ function getTzOffsetDiff(countryTz, year, month, day) {
 
 function compareLtWithFoc(focDateStr, ltTime, country) {
   // focDateStr = "2026-04-29T03:00:00" (CST floating)
-  // ltTime = { hour: 10, minute: 0 }
-  // country = "NL"
-  // Returns { match: true/false, ltLabel: "10:00 AM LT (NL)", cstLabel: "3:00 AM CST" }
+  // ltTime = { hour: 10, minute: 0, tzAbbr: 'AEST', tzIana: 'Australia/Sydney' }  or  { hour: 10, minute: 0, tzAbbr: 'LT' }
+  // country = "AU"
+  // Returns { match: true/false, ltLabel: "10:00 AM AEST (AU)", cstLabel: "7:00 PM CST" }
   
-  var tz = COUNTRY_TIMEZONES[country];
+  // Use explicit timezone from abbreviation if available, otherwise fall back to country map
+  var tz = (ltTime.tzIana) ? ltTime.tzIana : COUNTRY_TIMEZONES[country];
+  var tzLabel = (ltTime.tzAbbr && ltTime.tzAbbr !== 'LT') ? ltTime.tzAbbr : 'LT';
   if (!tz) return { match: null, ltLabel: null, cstLabel: null, error: 'No timezone for ' + country };
   
   var focParts = focDateStr.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
@@ -641,7 +698,7 @@ function compareLtWithFoc(focDateStr, ltTime, country) {
   // Format LT label
   var ltH12 = ltTime.hour % 12 || 12;
   var ltAmpm = ltTime.hour >= 12 ? 'PM' : 'AM';
-  var ltLabel = ltH12 + ':' + String(ltTime.minute).padStart(2, '0') + ' ' + ltAmpm + ' LT (' + country + ')';
+  var ltLabel = ltH12 + ':' + String(ltTime.minute).padStart(2, '0') + ' ' + ltAmpm + ' ' + tzLabel + ' (' + country + ')';
   
   // Format converted CST label
   var cstH12 = convertedHour % 12 || 12;
