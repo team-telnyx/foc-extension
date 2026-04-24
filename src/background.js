@@ -30,6 +30,13 @@ async function lookupAndRead(srId) {
   if (tabResult && !tabResult.error) {
     debug.push('got data, focDate=' + (tabResult.focDate || 'null'));
     if (tabResult.focDate) {
+      // ── LT → CST comparison ──
+      var ltTime = parseLocalTimeFromComment(tabResult.comment);
+      if (ltTime && tabResult.country) {
+        var comparison = compareLtWithFoc(tabResult.focDate, ltTime, tabResult.country);
+        tabResult.ltComparison = comparison;
+        debug.push('LT comparison: ' + (comparison.match === true ? 'MATCH' : comparison.match === false ? 'MISMATCH' : 'N/A'));
+      }
       return { order: tabResult, debug };
     }
     return { error: 'No FOC date found on ' + (tabResult.srId || srId) + '. FOC must be confirmed first.', debug };
@@ -488,6 +495,143 @@ function fetchOrderFromPageContext(srId) {
     console.log('[FOC Extension] Debug:', debugLog.join(' | '));
     return result;
   })();
+}
+
+// ─── Country → IANA Timezone Map ─────────────────────────────────────────────
+
+const COUNTRY_TIMEZONES = {
+  // Europe
+  AT: 'Europe/Vienna',    // Austria
+  BE: 'Europe/Brussels',  // Belgium
+  BG: 'Europe/Sofia',     // Bulgaria
+  HR: 'Europe/Zagreb',    // Croatia
+  CY: 'Asia/Nicosia',     // Cyprus
+  CZ: 'Europe/Prague',    // Czech Republic
+  DK: 'Europe/Copenhagen',// Denmark
+  EE: 'Europe/Tallinn',   // Estonia
+  FI: 'Europe/Helsinki',  // Finland
+  FR: 'Europe/Paris',     // France
+  DE: 'Europe/Berlin',    // Germany
+  GR: 'Europe/Athens',    // Greece
+  HU: 'Europe/Budapest',  // Hungary
+  IE: 'Europe/Dublin',    // Ireland
+  IT: 'Europe/Rome',      // Italy
+  LV: 'Europe/Riga',      // Latvia
+  LT: 'Europe/Vilnius',   // Lithuania
+  LU: 'Europe/Luxembourg',// Luxembourg
+  MT: 'Europe/Malta',     // Malta
+  NL: 'Europe/Amsterdam', // Netherlands
+  NO: 'Europe/Oslo',      // Norway
+  PL: 'Europe/Warsaw',    // Poland
+  PT: 'Europe/Lisbon',    // Portugal
+  RO: 'Europe/Bucharest', // Romania
+  SK: 'Europe/Bratislava',// Slovakia
+  SI: 'Europe/Ljubljana', // Slovenia
+  ES: 'Europe/Madrid',    // Spain
+  SE: 'Europe/Stockholm', // Sweden
+  CH: 'Europe/Zurich',   // Switzerland
+  GB: 'Europe/London',    // United Kingdom
+  // Asia-Pacific
+  AU: 'Australia/Sydney', // Australia (eastern)
+  NZ: 'Pacific/Auckland', // New Zealand
+  SG: 'Asia/Singapore',   // Singapore
+  HK: 'Asia/Hong_Kong',   // Hong Kong
+  JP: 'Asia/Tokyo',       // Japan
+  KR: 'Asia/Seoul',       // South Korea
+  TW: 'Asia/Taipei',      // Taiwan
+  IN: 'Asia/Kolkata',     // India
+  PH: 'Asia/Manila',      // Philippines
+  TH: 'Asia/Bangkok',     // Thailand
+  MY: 'Asia/Kuala_Lumpur',// Malaysia
+  // Africa / Middle East
+  ZA: 'Africa/Johannesburg', // South Africa
+  AE: 'Asia/Dubai',       // UAE
+  IL: 'Asia/Jerusalem',   // Israel
+  SA: 'Asia/Riyadh',      // Saudi Arabia
+};
+
+// ─── LT → CST Comparison ──────────────────────────────────────────────────────
+
+function parseLocalTimeFromComment(comment) {
+  if (!comment) return null;
+  // Patterns: "10 AM LT", "3:00 PM LT", "at 10 AM LT", "10am LT"
+  var match = comment.match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)\s*LT/i);
+  if (!match) return null;
+  var hour = parseInt(match[1]);
+  var minute = match[2] ? parseInt(match[2]) : 0;
+  var ampm = match[3].toUpperCase();
+  if (ampm === 'PM' && hour !== 12) hour += 12;
+  if (ampm === 'AM' && hour === 12) hour = 0;
+  return { hour: hour, minute: minute };
+}
+
+function getTzOffsetDiff(countryTz, year, month, day) {
+  // Returns the offset difference (country - CST) in minutes at the given date
+  // Positive means country is ahead of CST
+  var utcMs = Date.UTC(year, month - 1, day, 12, 0, 0);
+  var countryFmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: countryTz, hour: 'numeric', minute: 'numeric', hour12: false
+  });
+  var cstFmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Chicago', hour: 'numeric', minute: 'numeric', hour12: false
+  });
+  var countryStr = countryFmt.format(new Date(utcMs));
+  var cstStr = cstFmt.format(new Date(utcMs));
+  var cMatch = countryStr.match(/(\d{1,2}):(\d{2})/);
+  var cstMatch = cstStr.match(/(\d{1,2}):(\d{2})/);
+  if (!cMatch || !cstMatch) return null;
+  var countryMin = parseInt(cMatch[1]) * 60 + parseInt(cMatch[2]);
+  var cstMin = parseInt(cstMatch[1]) * 60 + parseInt(cstMatch[2]);
+  return countryMin - cstMin;
+}
+
+function compareLtWithFoc(focDateStr, ltTime, country) {
+  // focDateStr = "2026-04-29T03:00:00" (CST floating)
+  // ltTime = { hour: 10, minute: 0 }
+  // country = "NL"
+  // Returns { match: true/false, ltLabel: "10:00 AM LT (NL)", cstLabel: "3:00 AM CST" }
+  
+  var tz = COUNTRY_TIMEZONES[country];
+  if (!tz) return { match: null, ltLabel: null, cstLabel: null, error: 'No timezone for ' + country };
+  
+  var focParts = focDateStr.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+  if (!focParts) return { match: null, error: 'Invalid FOC date format' };
+  
+  var yr = parseInt(focParts[1]), mo = parseInt(focParts[2]), dy = parseInt(focParts[3]);
+  var focHourCST = parseInt(focParts[4]), focMinCST = parseInt(focParts[5]);
+  
+  // Get the offset difference between country TZ and CST on this date
+  var offsetDiff = getTzOffsetDiff(tz, yr, mo, dy);
+  if (offsetDiff === null) return { match: null, error: 'Could not compute offset' };
+  
+  // Convert LT to CST: CST = LT - offsetDiff
+  var ltTotalMin = ltTime.hour * 60 + ltTime.minute;
+  var cstTotalMin = ltTotalMin - offsetDiff;
+  
+  // Handle day wrap
+  while (cstTotalMin < 0) cstTotalMin += 1440;
+  while (cstTotalMin >= 1440) cstTotalMin -= 1440;
+  
+  var convertedHour = Math.floor(cstTotalMin / 60);
+  var convertedMin = Math.round(cstTotalMin % 60);
+  
+  // Format LT label
+  var ltH12 = ltTime.hour % 12 || 12;
+  var ltAmpm = ltTime.hour >= 12 ? 'PM' : 'AM';
+  var ltLabel = ltH12 + ':' + String(ltTime.minute).padStart(2, '0') + ' ' + ltAmpm + ' LT (' + country + ')';
+  
+  // Format converted CST label
+  var cstH12 = convertedHour % 12 || 12;
+  var cstAmpm = convertedHour >= 12 ? 'PM' : 'AM';
+  var cstLabel = cstH12 + ':' + String(convertedMin).padStart(2, '0') + ' ' + cstAmpm + ' CST';
+  
+  // Compare with FOC time
+  var focTotalMin = focHourCST * 60 + focMinCST;
+  var diffMin = Math.abs(cstTotalMin - focTotalMin);
+  // Allow up to 2 minute difference for rounding
+  var match = diffMin <= 2;
+  
+  return { match: match, ltLabel: ltLabel, cstLabel: cstLabel, diffMin: diffMin };
 }
 
 // ─── Google Calendar API ──────────────────────────────────────────────────────

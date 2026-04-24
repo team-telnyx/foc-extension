@@ -126,6 +126,20 @@ fetchBtn.addEventListener('click', async () => {
   var orderStatus = (order.status || 'unknown').toLowerCase().replace(/\s+/g, '-');
   var statusLabel = order.status || 'Unknown';
   statusEl.innerHTML = '<span class="status-badge ' + orderStatus + '">' + statusLabel + '</span>';
+  
+  // Show LT → CST comparison if available
+  var ltRow = document.getElementById('previewLtRow');
+  var ltEl = document.getElementById('previewLt');
+  if (order.ltComparison && order.ltComparison.ltLabel) {
+    var cmp = order.ltComparison;
+    var icon = cmp.match === true ? '✅' : cmp.match === false ? '⚠️' : '❓';
+    var color = cmp.match === true ? '#68d391' : cmp.match === false ? '#ed8936' : '#a0aec0';
+    ltEl.innerHTML = '<span style="color:' + color + '">' + icon + ' ' + cmp.ltLabel + ' = ' + cmp.cstLabel + '</span>';
+    ltRow.style.display = 'flex';
+  } else {
+    ltRow.style.display = 'none';
+  }
+  
   previewEl.classList.add('visible');
   // Show debug info on success too
   var debugHtml = '';
