@@ -213,7 +213,30 @@ function fetchOrderFromPageContext(srId) {
       var descSearch = rawText.match(/\b([A-Z]{2})\s+(local|national|international|tollfree|mobile)\b/i);
       debugLog.push('country regex on full text: ' + (descSearch ? descSearch[0] : 'NO MATCH'));
 
-      var result = { srId: srNum, country: country, focDate: focDate, comment: comment };
+      var result = { srId: srNum, country: country, focDate: focDate, comment: comment, status: null };
+      
+      // ── Read the order status badge from the detail page ──
+      // The status appears as a badge next to "Sub Request sr_xxx"
+      // e.g., "Submitted", "FOC Date Confirmed", "Exception", "Ported", "Cancelled"
+      var statusBadges = document.querySelectorAll('.label, .badge, span[class*="label"], span[class*="badge"], span[class*="status"], span[class*="tag"]');
+      for (var sbi = 0; sbi < statusBadges.length; sbi++) {
+        var sbText = (statusBadges[sbi].textContent || '').trim();
+        if (/^(in process|submitted|exception|foc date confirmed|ported|cancelled|cancel pending|new)$/i.test(sbText)) {
+          result.status = sbText;
+          break;
+        }
+      }
+      // Fallback: look for status text in the heading area
+      if (!result.status) {
+        var headingArea = rawText.substring(0, rawText.indexOf('Port Request'));
+        if (headingArea) {
+          var statusMatch = headingArea.match(/\b(In Process|Submitted|Exception|FOC Date Confirmed|Ported|Cancelled|Cancel Pending|New)\b/i);
+          if (statusMatch) {
+            result.status = statusMatch[1];
+          }
+        }
+      }
+      
       if (uuids) result._uuids = uuids;
       return result;
     }
@@ -221,10 +244,54 @@ function fetchOrderFromPageContext(srId) {
     // ─── Step 1: Navigate to queue if not already there ────────────
     debugLog.push('current hash: ' + window.location.hash.substring(0, 80));
     if (!window.location.hash.includes('queue')) {
-      window.location.hash = '#!/queue?statuses=in-process&statuses=submitted&statuses=exception&statuses=foc-date-confirmed';
+      window.location.hash = '#!/queue';
       await new Promise(function(r) { setTimeout(r, 4000); });
       debugLog.push('navigated to queue, hash: ' + window.location.hash.substring(0, 80));
     }
+
+    // ─── Step 1b: Select "All" status filter ─────────────────────────
+    // The queue has status checkboxes (In process, Submitted, Exception, etc.)
+    // We need to click "All" so that orders in ANY status are visible
+    await new Promise(function(r) { setTimeout(r, 1000); });
+    var allRadioClicked = false;
+    var allLabels = document.querySelectorAll('label');
+    for (var ali = 0; ali < allLabels.length; ali++) {
+      if ((allLabels[ali].textContent || '').trim().toLowerCase() === 'all') {
+        // Check if it has an associated radio/checkbox
+        var allInput = allLabels[ali].querySelector('input[type="radio"], input[type="checkbox"]');
+        if (allInput) {
+          allInput.click();
+          allRadioClicked = true;
+          debugLog.push('clicked All status filter');
+          break;
+        }
+        // Or check previous sibling
+        var prev = allLabels[ali].previousElementSibling;
+        if (prev && (prev.type === 'radio' || prev.type === 'checkbox')) {
+          prev.click();
+          allRadioClicked = true;
+          debugLog.push('clicked All status filter (prev sibling)');
+          break;
+        }
+      }
+    }
+    // Also try finding the radio/checkbox directly by value or nearby text
+    if (!allRadioClicked) {
+      var allRadios = document.querySelectorAll('input[type="radio"], input[type="checkbox"]');
+      for (var ari = 0; ari < allRadios.length; ari++) {
+        var parent = allRadios[ari].parentElement;
+        if (parent && (parent.textContent || '').trim().toLowerCase() === 'all') {
+          allRadios[ari].click();
+          allRadioClicked = true;
+          debugLog.push('clicked All status filter (via parent text)');
+          break;
+        }
+      }
+    }
+    if (!allRadioClicked) {
+      debugLog.push('could not find All status filter, continuing anyway');
+    }
+    await new Promise(function(r) { setTimeout(r, 1000); });
 
     // ─── Step 2: Find and fill the search input ────────────────────
     var searchInput = null;
@@ -460,6 +527,7 @@ function fetchOrderFromPageContext(srId) {
     debugLog.push('focDate found: ' + (result.focDate || 'null'));
     debugLog.push('srId found: ' + (result.srId || 'null'));
     debugLog.push('comment found: ' + (result.comment || 'null'));
+    debugLog.push('status found: ' + (result.status || 'null'));
     // Log to console so we can see it in DevTools
     console.log('[FOC Extension] Result:', JSON.stringify(result));
     console.log('[FOC Extension] Debug:', debugLog.join(' | '));

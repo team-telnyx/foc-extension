@@ -120,6 +120,12 @@ fetchBtn.addEventListener('click', async () => {
     hrs === 1 ? '1 hour (default)' :
     hrs < 1   ? (hrs * 60) + ' minutes' :
                 hrs + ' hours';
+  
+  // Show order status badge
+  var statusEl = document.getElementById('previewStatus');
+  var orderStatus = (order.status || 'unknown').toLowerCase().replace(/\s+/g, '-');
+  var statusLabel = order.status || 'Unknown';
+  statusEl.innerHTML = '<span class="status-badge ' + orderStatus + '">' + statusLabel + '</span>';
   previewEl.classList.add('visible');
   // Show debug info on success too
   var debugHtml = '';
