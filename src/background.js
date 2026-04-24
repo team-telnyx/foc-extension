@@ -201,8 +201,9 @@ function fetchOrderFromPageContext(srId) {
       var tzAbbrRe = tzAbbrList.join('|');
       
       // Try to get the full comment/note text from the page
+      // Iterate in REVERSE order (newest comments last in DOM) to pick the LATEST comment with a time pattern
       var commentElements = document.querySelectorAll('.comment-text, .note-text, [ng-if*="comment"], [ng-bind*="comment"]');
-      for (var cei = 0; cei < commentElements.length; cei++) {
+      for (var cei = commentElements.length - 1; cei >= 0; cei--) {
         var cText = (commentElements[cei].textContent || '').trim();
         if (cText.length > comment.length && new RegExp('\\d+\\s*(am|pm)\\s*(' + tzAbbrRe + ')', 'i').test(cText)) {
           fullComment = cText;
@@ -212,28 +213,29 @@ function fetchOrderFromPageContext(srId) {
       
       // If no dedicated element, search the full page text for time + timezone patterns
       if (!fullComment) {
-        // Look for the sentence containing "X AM/PM [TZ_ABBREV]"
-        var ltSentence = rawText.match(new RegExp('[^.!?]*\\d{1,2}(?::\\d{2})?\\s*(?:AM|PM)\\s*(?:' + tzAbbrRe + ')[^.!?]*[.!?]', 'i'));
-        if (ltSentence) {
-          fullComment = ltSentence[0];
+        // Look for the sentence containing "X AM/PM [TZ_ABBREV]" — prefer LAST (newest) match
+        var ltRe = new RegExp('[^.!?]*\\d{1,2}(?::\\d{2})?\\s*(?:AM|PM)\\s*(?:' + tzAbbrRe + ')[^.!?]*[.!?]', 'gi');
+        var ltAll = rawText.match(ltRe);
+        if (ltAll && ltAll.length > 0) {
+          fullComment = ltAll[ltAll.length - 1];
         }
       }
       
       // Broader fallback: any sentence with a time (AM/PM) near a timezone keyword
       if (!fullComment) {
-        var broadRe = new RegExp("[^.!?]{10,}\\d{1,2}(?::\\d{2})?\\s*(?:AM|PM)[^.!?]{0,30}(?:AEST|AEDT|CEST|CET|JST|KST|SGT|HKT|NZST|NZDT|LT)[^.!?]*", "i");
-        var broadMatch = rawText.match(broadRe);
-        if (broadMatch) {
-          fullComment = broadMatch[0];
+        var broadRe = new RegExp("[^.!?]{10,}\\d{1,2}(?::\\d{2})?\\s*(?:AM|PM)[^.!?]{0,30}(?:AEST|AEDT|CEST|CET|JST|KST|SGT|HKT|NZST|NZDT|LT)[^.!?]*", "gi");
+        var broadAll = rawText.match(broadRe);
+        if (broadAll && broadAll.length > 0) {
+          fullComment = broadAll[broadAll.length - 1];
         }
       }
       
       // Final fallback: any sentence with AM/PM + timezone abbreviation
       if (!fullComment && country) {
-        var anyTimeRe = new RegExp("[^.!?]{5,}\\b\\d{1,2}(?::\\d{2})?\\s*(?:AM|PM)\\s*(?:LT|AEST|AEDT|CEST|CET|JST|KST|SGT|HKT|NZST|NZDT|ACST|ACDT|AWST|WET|WEST|EET|EEST|BST|GMT|IST|GST|SAST|AST|PHT|ICT|MYT|TWT|MET|MEST)\\b[^.!?]{0,50}", "i");
-        var anyTimeMatch = rawText.match(anyTimeRe);
-        if (anyTimeMatch) {
-          fullComment = anyTimeMatch[0];
+        var anyTimeRe = new RegExp("[^.!?]{5,}\\b\\d{1,2}(?::\\d{2})?\\s*(?:AM|PM)\\s*(?:LT|AEST|AEDT|CEST|CET|JST|KST|SGT|HKT|NZST|NZDT|ACST|ACDT|AWST|WET|WEST|EET|EEST|BST|GMT|IST|GST|SAST|AST|PHT|ICT|MYT|TWT|MET|MEST)\\b[^.!?]{0,50}", "gi");
+        var anyTimeAll = rawText.match(anyTimeRe);
+        if (anyTimeAll && anyTimeAll.length > 0) {
+          fullComment = anyTimeAll[anyTimeAll.length - 1];
         }
       }
       
@@ -242,13 +244,17 @@ function fetchOrderFromPageContext(srId) {
       if (!fullComment && country) {
         // Look for a time like "8:00 AM" or "10 AM" in a sentence that mentions
         // carrier confirmation, FOC, or release — signals it's a local time
-        var bareTimeRe = new RegExp('[^.!?]*\\d{1,2}(?::\\d{2})?\\s*(?:AM|PM)[^.!?]*', 'i');
-        var bareTimeMatch = rawText.match(bareTimeRe);
-        if (bareTimeMatch) {
+        var bareTimeRe = new RegExp('[^.!?]*\\d{1,2}(?::\\d{2})?\\s*(?:AM|PM)[^.!?]*', 'gi');
+        var bareTimeAll = rawText.match(bareTimeRe);
+        if (bareTimeAll && bareTimeAll.length > 0) {
           // Only use if the sentence looks like it's about FOC/porting timing
-          var sentence = bareTimeMatch[0];
-          if (/(?:confirmation|confirm|FOC|release|port|trigger|carrier|schedule)/i.test(sentence)) {
-            fullComment = sentence + ' LT';  // Append LT so parseLocalTimeFromComment matches it
+          // Check from last match first (newest)
+          for (var bti = bareTimeAll.length - 1; bti >= 0; bti--) {
+            var sentence = bareTimeAll[bti];
+            if (/(?:confirmation|confirm|FOC|release|port|trigger|carrier|schedule)/i.test(sentence)) {
+              fullComment = sentence + ' LT';  // Append LT so parseLocalTimeFromComment matches it
+              break;
+            }
           }
         }
       }
