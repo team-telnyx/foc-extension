@@ -30,8 +30,20 @@ async function lookupAndRead(srId) {
   if (tabResult && !tabResult.error) {
     debug.push('got data, focDate=' + (tabResult.focDate || 'null'));
     if (tabResult.focDate) {
-      // ── LT → CST comparison ──
+      // ── Fetch latest comment via API for accurate D&T Verify ──
       var ltSource = tabResult.fullComment || tabResult.comment;
+      if (tabResult._uuids && tabResult._uuids.subRequestId) {
+        try {
+          var apiComments = await fetchLatestCommentViaApi(tabResult._uuids);
+          if (apiComments) {
+            debug.push('API comment: ' + apiComments.substring(0, 100));
+            ltSource = apiComments;  // Prefer API-sourced latest comment
+          }
+        } catch (e) {
+          debug.push('API comment fetch failed: ' + e.message);
+        }
+      }
+      // ── LT → CST comparison ──
       var ltTime = parseLocalTimeFromComment(ltSource, tabResult.country);
       if (ltTime && tabResult.country) {
         var comparison = compareLtWithFoc(tabResult.focDate, ltTime, tabResult.country);
@@ -695,6 +707,69 @@ const TZ_ABBREV = {
   IST_IL: 'Asia/Jerusalem',   // Israel Standard Time
   AST:  'Asia/Riyadh',        // Arabia Standard Time
 };
+
+// ─── Fetch latest comment via PortingAdmin API ──────────────────────────────
+// Uses the sub-request UUID to call the API and get the most recent comment.
+// This avoids parsing rawText which contains ALL old comments.
+async function fetchLatestCommentViaApi(uuids) {
+  // We need cookies from portingadmin.telnyx.com to authenticate
+  // The API endpoint for sub-request comments
+  var subUuid = uuids.subRequestId;
+  var portUuid = uuids.portRequestId;
+  if (!subUuid) return null;
+  
+  // Try the sub-request comments endpoint
+  var apiUrl = 'https://api-internal.telnyx.com/api/porting/v1/sub_requests/' + subUuid + '/comments';
+  
+  try {
+    // Get cookies from portingadmin.telnyx.com
+    var cookieUrl = 'https://portingadmin.telnyx.com';
+    var cookies = await chrome.cookies.getAll({ domain: '.telnyx.com' });
+    var cookieHeader = cookies.map(function(c) { return c.name + '=' + c.value; }).join('; ');
+    
+    var resp = await fetch(apiUrl, {
+      method: 'GET',
+      headers: {
+        'Cookie': cookieHeader,
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      },
+      credentials: 'include'
+    });
+    
+    if (!resp.ok) {
+      // Try alternate endpoint pattern
+      apiUrl = 'https://api-internal.telnyx.com/api/porting/v1/port_requests/' + portUuid + '/sub_requests/' + subUuid + '/comments';
+      resp = await fetch(apiUrl, {
+        method: 'GET',
+        headers: {
+          'Cookie': cookieHeader,
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        },
+        credentials: 'include'
+      });
+    }
+    
+    if (!resp.ok) return null;
+    
+    var data = await resp.json();
+    // Comments are usually in data.data or data as an array
+    var comments = data.data || data;
+    if (!Array.isArray(comments) || comments.length === 0) return null;
+    
+    // Sort by created_at descending to get the latest
+    comments.sort(function(a, b) {
+      return new Date(b.created_at || b.createdAt || 0) - new Date(a.created_at || a.createdAt || 0);
+    });
+    
+    // Return the latest comment's body/text
+    var latest = comments[0];
+    return latest.body || latest.text || latest.content || latest.comment || null;
+  } catch (e) {
+    return null;
+  }
+}
 
 // ─── LT → CST Comparison ──────────────────────────────────────────────────────
 
