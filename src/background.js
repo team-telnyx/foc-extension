@@ -758,13 +758,28 @@ async function fetchLatestCommentViaApi(uuids) {
     var comments = data.data || data;
     if (!Array.isArray(comments) || comments.length === 0) return null;
     
+    // Log the API response structure for debugging
+    console.log('[FOC] API comments count:', comments.length);
+    if (comments.length > 0) {
+      console.log('[FOC] First comment keys:', Object.keys(comments[0]).join(', '));
+      console.log('[FOC] First comment sample:', JSON.stringify(comments[0]).substring(0, 200));
+      console.log('[FOC] Last comment sample:', JSON.stringify(comments[comments.length - 1]).substring(0, 200));
+    }
+    
     // Sort by created_at descending to get the latest
     comments.sort(function(a, b) {
-      return new Date(b.created_at || b.createdAt || 0) - new Date(a.created_at || a.createdAt || 0);
+      var aTime = a.created_at || a.createdAt || a.created_at_date || '';
+      var bTime = b.created_at || b.createdAt || b.created_at_date || '';
+      if (!aTime && !bTime) return 0;  // Can't sort without dates
+      return new Date(bTime || 0) - new Date(aTime || 0);
     });
     
-    // Return the latest comment's body/text
-    var latest = comments[0];
+    // If no date fields found, take the LAST comment (APIs often return newest last)
+    var hasDateField = comments.some(function(c) { return c.created_at || c.createdAt || c.created_at_date; });
+    var latest = hasDateField ? comments[0] : comments[comments.length - 1];
+    
+    console.log('[FOC] Selected latest comment (hasDateField=' + hasDateField + '):', (latest.body || latest.text || latest.content || latest.comment || '').substring(0, 200));
+    
     return latest.body || latest.text || latest.content || latest.comment || null;
   } catch (e) {
     return null;
