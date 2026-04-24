@@ -178,12 +178,11 @@ createBtn.addEventListener('click', async () => {
   // setTimeout(() => window.close(), 800);
 });
 
-// ─── Settings ────────────────────────────────────────────────────────────────
-document.getElementById('settingsLink').addEventListener('click', (e) => {
+// ─── Logs toggle ────────────────────────────────────────────────────────
+document.getElementById('logsLink').addEventListener('click', (e) => {
   e.preventDefault();
-  if (chrome.runtime.openOptionsPage) {
-    chrome.runtime.openOptionsPage();
-  } else {
-    alert('Settings coming soon');
+  var debugEl = document.getElementById('debugInfo');
+  if (debugEl) {
+    debugEl.style.display = debugEl.style.display === 'none' ? 'block' : 'none';
   }
 });
