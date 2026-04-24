@@ -458,6 +458,9 @@ function fetchOrderFromPageContext(srId) {
 
     debugLog.push('search input value after set: "' + searchInput.value + '"');
 
+    // Small delay to let Angular's digest cycle pick up the new value
+    await new Promise(function(r) { setTimeout(r, 500); });
+
     // ─── Step 4: Click the Search button ──────────────────────────
     // Find the Search button that's a sibling of this specific input
     var searchBtn = null;
@@ -570,10 +573,61 @@ function fetchOrderFromPageContext(srId) {
 
     if (!foundLink) {
       // Last resort: log page contents
-      var sample = document.body.innerText.substring(0, 500).replace(/\n/g, ' | ');
+      var sample = document.body.innerText.substring(0, 500).replace(/n/g, ' | ');
       debugLog.push('no link found. page sample: ' + sample);
       debugLog.push('search input value: "' + searchInput.value + '"');
-      return { error: 'Could not find ' + srId + ' in search results.', _debugLog: debugLog };
+      
+      // ── Retry: wait longer and search again ──
+      debugLog.push('retrying search in 5s...');
+      await new Promise(function(r) { setTimeout(r, 5000); });
+      
+      // Re-type and re-click
+      searchInput.focus();
+      searchInput.select();
+      try { document.execCommand('insertText', false, srId); } catch(e) {}
+      if (searchInput.value !== srId) {
+        var nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+        nativeSetter.call(searchInput, srId);
+        searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      // Trigger Angular
+      try {
+        var ngScope2 = window.angular && window.angular.element(searchInput).scope();
+        if (ngScope2) { ngScope2.$apply(); }
+      } catch(e) {}
+      
+      if (searchBtn) { searchBtn.click(); }
+      else { searchInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, bubbles: true })); }
+      debugLog.push('retry: clicked search again');
+      await new Promise(function(r) { setTimeout(r, 6000); });
+      
+      // Try finding SR again
+      var retryElements = document.querySelectorAll('*');
+      for (var rei = 0; rei < retryElements.length; rei++) {
+        var ret = (retryElements[rei].textContent || '').trim();
+        if (ret.toLowerCase() === srId.toLowerCase() || ret.toLowerCase() === srShortId.toLowerCase()) {
+          var walkR = retryElements[rei];
+          for (var rwi = 0; rwi < 12; rwi++) {
+            walkR = walkR.parentElement;
+            if (!walkR) break;
+            var retryAnchors = walkR.querySelectorAll('a');
+            for (var rai = 0; rai < retryAnchors.length; rai++) {
+              if (/sub-request\/[a-f0-9-]{36}/i.test(retryAnchors[rai].getAttribute('href') || '')) {
+                foundLink = retryAnchors[rai];
+                debugLog.push('retry: found link!');
+                break;
+              }
+            }
+            if (foundLink) break;
+          }
+          if (foundLink) break;
+        }
+      }
+      
+      if (!foundLink) {
+        debugLog.push('retry also failed');
+        return { error: 'Could not find ' + srId + ' in search results.', _debugLog: debugLog };
+      }
     }
 
     // ─── Step 5: Click the result link ─────────────────────────────
