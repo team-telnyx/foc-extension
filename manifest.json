@@ -1,0 +1,43 @@
+{
+  "manifest_version": 3,
+  "name": "FOC Calendar Sync",
+  "version": "1.0.0",
+  "description": "Create Google Calendar events for APAC porting orders when FOC is set.",
+  "permissions": [
+    "identity",
+    "storage",
+    "activeTab",
+    "tabs",
+    "cookies",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://portingadmin.telnyx.com/*",
+    "https://api.telnyx.com/*",
+    "https://api-internal.telnyx.com/*",
+    "https://www.googleapis.com/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://portingadmin.telnyx.com/*"],
+      "js": ["src/content.js"]
+    }
+  ],
+  "background": {
+    "service_worker": "src/background.js"
+  },
+  "oauth2": {
+    "client_id": "745476448516-pk24jhdho2jeeuhkqgkpgkpr176ml423.apps.googleusercontent.com",
+    "scopes": [
+      "https://www.googleapis.com/auth/calendar.events"
+    ]
+  }
+}
