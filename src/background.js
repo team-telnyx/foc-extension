@@ -47,7 +47,7 @@ async function lookupAndRead(srId) {
 async function fetchViaTabApi(srId) {
   return new Promise((resolve) => {
     chrome.tabs.create({
-      url: 'https://portingadmin.telnyx.com/#!/queue?statuses=in-process&statuses=submitted&statuses=exception&statuses=foc-date-confirmed',
+      url: 'https://portingadmin.telnyx.com/#!/queue?statuses=all',
       active: false
     }, function(tab) {
       const tabId = tab.id;
