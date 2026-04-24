@@ -241,57 +241,60 @@ function fetchOrderFromPageContext(srId) {
       return result;
     }
 
-    // ─── Step 1: Navigate to queue if not already there ────────────
+    // ─── Step 1: Navigate to queue with ALL statuses ────────────
     debugLog.push('current hash: ' + window.location.hash.substring(0, 80));
-    if (!window.location.hash.includes('queue')) {
-      window.location.hash = '#!/queue';
-      await new Promise(function(r) { setTimeout(r, 4000); });
-      debugLog.push('navigated to queue, hash: ' + window.location.hash.substring(0, 80));
-    }
+    // Navigate to queue with every status included in the URL
+    // This way orders in ANY status (Ported, Cancelled, etc.) will be visible
+    var queueUrl = '#!/queue?statuses=in-process&statuses=submitted&statuses=exception&statuses=foc-date-confirmed&statuses=ported&statuses=cancelled&statuses=cancel-pending&statuses=new';
+    window.location.hash = queueUrl;
+    await new Promise(function(r) { setTimeout(r, 5000); });
+    debugLog.push('navigated to queue (all statuses), hash: ' + window.location.hash.substring(0, 80));
 
-    // ─── Step 1b: Select "All" status filter ─────────────────────────
-    // The queue has status checkboxes (In process, Submitted, Exception, etc.)
-    // We need to click "All" so that orders in ANY status are visible
+    // ─── Step 1b: Ensure "All" status filter is selected ──────────────
+    // The URL params may set the filter, but also try clicking "All" in the UI
     await new Promise(function(r) { setTimeout(r, 1000); });
-    var allRadioClicked = false;
-    var allLabels = document.querySelectorAll('label');
-    for (var ali = 0; ali < allLabels.length; ali++) {
-      if ((allLabels[ali].textContent || '').trim().toLowerCase() === 'all') {
-        // Check if it has an associated radio/checkbox
-        var allInput = allLabels[ali].querySelector('input[type="radio"], input[type="checkbox"]');
-        if (allInput) {
-          allInput.click();
-          allRadioClicked = true;
-          debugLog.push('clicked All status filter');
+    var allFilterClicked = false;
+    
+    // Diagnostic: log all checkboxes/radios found
+    var allCheckboxes = document.querySelectorAll('input[type="checkbox"], input[type="radio"]');
+    debugLog.push('found ' + allCheckboxes.length + ' checkboxes/radios');
+    var cbDebug = [];
+    for (var cbi = 0; cbi < Math.min(allCheckboxes.length, 20); cbi++) {
+      var cbPar = allCheckboxes[cbi].parentElement;
+      var cbParTxt = cbPar ? (cbPar.textContent || '').trim().substring(0, 25) : '';
+      cbDebug.push('#' + cbi + ':' + (allCheckboxes[cbi].checked ? 'on' : 'off') + ' p="' + cbParTxt + '"');
+    }
+    debugLog.push('checkboxes: ' + cbDebug.join(' | '));
+    
+    // Try clicking the "All" element by searching all elements
+    var allEls = document.querySelectorAll('*');
+    for (var aei = 0; aei < allEls.length; aei++) {
+      var aeText = (allEls[aei].textContent || '').trim();
+      var aeTag = allEls[aei].tagName.toLowerCase();
+      // Match elements whose ONLY text content is "All" (not parent containers with more text)
+      if (aeText.toLowerCase() === 'all' && aeTag !== 'body' && aeTag !== 'html') {
+        // Check if there's a checkbox inside or nearby
+        var innerCb = allEls[aei].querySelector('input[type="checkbox"], input[type="radio"]');
+        if (innerCb && !innerCb.checked) {
+          innerCb.click();
+          allFilterClicked = true;
+          debugLog.push('clicked All checkbox inside <' + aeTag + '>');
           break;
         }
-        // Or check previous sibling
-        var prev = allLabels[ali].previousElementSibling;
-        if (prev && (prev.type === 'radio' || prev.type === 'checkbox')) {
-          prev.click();
-          allRadioClicked = true;
-          debugLog.push('clicked All status filter (prev sibling)');
+        // Click the element itself
+        if (!allFilterClicked) {
+          allEls[aei].click();
+          allFilterClicked = true;
+          debugLog.push('clicked All element <' + aeTag + '>');
           break;
         }
       }
     }
-    // Also try finding the radio/checkbox directly by value or nearby text
-    if (!allRadioClicked) {
-      var allRadios = document.querySelectorAll('input[type="radio"], input[type="checkbox"]');
-      for (var ari = 0; ari < allRadios.length; ari++) {
-        var parent = allRadios[ari].parentElement;
-        if (parent && (parent.textContent || '').trim().toLowerCase() === 'all') {
-          allRadios[ari].click();
-          allRadioClicked = true;
-          debugLog.push('clicked All status filter (via parent text)');
-          break;
-        }
-      }
+    
+    if (!allFilterClicked) {
+      debugLog.push('WARNING: could not click All filter — relying on URL params only');
     }
-    if (!allRadioClicked) {
-      debugLog.push('could not find All status filter, continuing anyway');
-    }
-    await new Promise(function(r) { setTimeout(r, 1000); });
+    await new Promise(function(r) { setTimeout(r, 1500); });
 
     // ─── Step 2: Find and fill the search input ────────────────────
     var searchInput = null;
