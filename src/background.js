@@ -262,6 +262,10 @@ function fetchOrderFromPageContext(srId) {
       var pageSample = rawText.substring(0, 2000).replace(/\n/g, ' | ');
       debugLog.push('page text (2k): ' + pageSample);
       debugLog.push('country detected: ' + (country || 'NULL'));
+      debugLog.push('fullComment: ' + (fullComment ? fullComment.substring(0, 100) : 'NULL'));
+      // Check if AEST/CEST etc. appears in rawText
+      var tzInText = rawText.match(/\d{1,2}(?::\d{2})?\s*(?:AM|PM)\s*(?:AEST|AEDT|CEST|CET|JST|KST|SGT|HKT|NZST|NZDT|LT)/i);
+      debugLog.push('tz time in rawText: ' + (tzInText ? tzInText[0] : 'NULL'));
       debugLog.push('total text length: ' + rawText.length);
       // Search for description value in full text
       var descSearch = rawText.match(/\b([A-Z]{2})\s+(local|national|international|tollfree|mobile)\b/i);
