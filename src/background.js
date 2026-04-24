@@ -663,14 +663,31 @@ function parseLocalTimeFromComment(comment) {
   if (!comment) return null;
   
   // Extract the date from the comment text first
-  // Patterns: "04/24/2026", "04/24/26", "4/24/2026", "2026-04-24"
+  // Patterns: "04/24/2026", "04/24/26", "4/24/2026", "24/4/26", "2026-04-24"
   var dateMatch = comment.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
   var commentYear = null, commentMonth = null, commentDay = null;
   if (dateMatch) {
-    commentMonth = parseInt(dateMatch[1]);
-    commentDay = parseInt(dateMatch[2]);
-    commentYear = parseInt(dateMatch[3]);
-    if (commentYear < 100) commentYear += 2000; // 26 → 2026
+    var a = parseInt(dateMatch[1]);
+    var b = parseInt(dateMatch[2]);
+    var yr = parseInt(dateMatch[3]);
+    if (yr < 100) yr += 2000; // 26 → 2026
+    commentYear = yr;
+    // Smart detection: if first number > 12, it must be DD/MM (day first)
+    // If second number > 12, it must be MM/DD (month first)
+    // If both <= 12, default to MM/DD (US format)
+    if (a > 12) {
+      // First number can't be a month → DD/MM format
+      commentDay = a;
+      commentMonth = b;
+    } else if (b > 12) {
+      // Second number can't be a month → MM/DD format
+      commentMonth = a;
+      commentDay = b;
+    } else {
+      // Both <= 12, ambiguous — default to MM/DD (US format)
+      commentMonth = a;
+      commentDay = b;
+    }
   }
   // Also try ISO format: "2026-04-24"
   if (!dateMatch) {
