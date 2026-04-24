@@ -36,7 +36,7 @@ async function lookupAndRead(srId) {
         try {
           var apiComments = await fetchLatestCommentViaApi(tabResult._uuids);
           if (apiComments) {
-            debug.push('API comment: ' + apiComments.substring(0, 100));
+            debug.push('API comment: ' + apiComments.substring(0, 300));
             ltSource = apiComments;  // Prefer API-sourced latest comment
           }
         } catch (e) {
