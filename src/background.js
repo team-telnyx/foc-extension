@@ -193,23 +193,47 @@ function fetchOrderFromPageContext(srId) {
       var comment = '';
       var fullComment = '';  // Full comment text for LT time parsing
       
+      // Build a regex that matches any timezone abbreviation or "LT"
+      var tzAbbrList = ['LT', 'AEST', 'AEDT', 'ACST', 'ACDT', 'AWST', 'NZST', 'NZDT',
+        'CEST', 'CET', 'WET', 'WEST', 'EEST', 'EET', 'GMT', 'BST', 'IST',
+        'SGT', 'HKT', 'JST', 'KST', 'TWT', 'CST', 'PHT', 'ICT', 'MYT',
+        'SAST', 'GST', 'AST', 'MET', 'MEST'];
+      var tzAbbrRe = tzAbbrList.join('|');
+      
       // Try to get the full comment/note text from the page
-      // Comments are usually in a dedicated section with comment text
       var commentElements = document.querySelectorAll('.comment-text, .note-text, [ng-if*="comment"], [ng-bind*="comment"]');
       for (var cei = 0; cei < commentElements.length; cei++) {
         var cText = (commentElements[cei].textContent || '').trim();
-        if (cText.length > comment.length && /\d+\s*(am|pm)\s*lt/i.test(cText)) {
+        if (cText.length > comment.length && new RegExp('\\d+\\s*(am|pm)\\s*(' + tzAbbrRe + ')', 'i').test(cText)) {
           fullComment = cText;
           break;
         }
       }
       
-      // If no dedicated element, search the full page text for LT time patterns
+      // If no dedicated element, search the full page text for time + timezone patterns
       if (!fullComment) {
-        // Look for the sentence containing "X AM/PM LT"
-        var ltSentence = rawText.match(/[^.!?]*\d{1,2}(?::\d{2})?\s*(?:AM|PM)\s*LT[^.!?]*[.!?]/i);
+        // Look for the sentence containing "X AM/PM [TZ_ABBREV]"
+        var ltSentence = rawText.match(new RegExp('[^.!?]*\\d{1,2}(?::\\d{2})?\\s*(?:AM|PM)\\s*(?:' + tzAbbrRe + ')[^.!?]*[.!?]', 'i'));
         if (ltSentence) {
           fullComment = ltSentence[0];
+        }
+      }
+      
+      // Broader fallback: any sentence with a time (AM/PM) near a timezone keyword
+      if (!fullComment) {
+        var broadRe = new RegExp("[^.!?]{10,}\\d{1,2}(?::\\d{2})?\\s*(?:AM|PM)[^.!?]{0,30}(?:AEST|AEDT|CEST|CET|JST|KST|SGT|HKT|NZST|NZDT|LT)[^.!?]*", "i");
+        var broadMatch = rawText.match(broadRe);
+        if (broadMatch) {
+          fullComment = broadMatch[0];
+        }
+      }
+      
+      // Final fallback: any sentence with AM/PM + timezone abbreviation
+      if (!fullComment && country) {
+        var anyTimeRe = new RegExp("[^.!?]{5,}\\b\\d{1,2}(?::\\d{2})?\\s*(?:AM|PM)\\s*(?:LT|AEST|AEDT|CEST|CET|JST|KST|SGT|HKT|NZST|NZDT|ACST|ACDT|AWST|WET|WEST|EET|EEST|BST|GMT|IST|GST|SAST|AST|PHT|ICT|MYT|TWT|MET|MEST)\\b[^.!?]{0,50}", "i");
+        var anyTimeMatch = rawText.match(anyTimeRe);
+        if (anyTimeMatch) {
+          fullComment = anyTimeMatch[0];
         }
       }
       
