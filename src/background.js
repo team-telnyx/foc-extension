@@ -201,13 +201,28 @@ function fetchOrderFromPageContext(srId) {
       var tzAbbrRe = tzAbbrList.join('|');
       
       // Try to get the full comment/note text from the page
-      // Iterate in REVERSE order (newest comments last in DOM) to pick the LATEST comment with a time pattern
+      // ── Strategy: find comment blocks in the DOM, prefer the LATEST with a time pattern ──
       var commentElements = document.querySelectorAll('.comment-text, .note-text, [ng-if*="comment"], [ng-bind*="comment"]');
+      if (commentElements.length === 0) {
+        // Broader: look for comment list items or card-like containers
+        commentElements = document.querySelectorAll('.comment, .note, .activity-item, .timeline-item, [class*="comment"], [class*="note"]');
+      }
+      // Iterate in reverse (newest comments last in DOM) to pick the LATEST with a time+TZ pattern
       for (var cei = commentElements.length - 1; cei >= 0; cei--) {
         var cText = (commentElements[cei].textContent || '').trim();
         if (cText.length > comment.length && new RegExp('\\d+\\s*(am|pm)\\s*(' + tzAbbrRe + ')', 'i').test(cText)) {
           fullComment = cText;
           break;
+        }
+      }
+      // If no TZ abbreviation match, try latest comment with any AM/PM time
+      if (!fullComment && commentElements.length > 0) {
+        for (var cei2 = commentElements.length - 1; cei2 >= 0; cei2--) {
+          var cText2 = (commentElements[cei2].textContent || '').trim();
+          if (cText2.length > comment.length && /\d{1,2}(?::\d{2})?\s*(?:AM|PM)/i.test(cText2)) {
+            fullComment = cText2;
+            break;
+          }
         }
       }
       
@@ -283,6 +298,24 @@ function fetchOrderFromPageContext(srId) {
       // Dump a sample of the page text for debugging
       var pageSample = rawText.substring(0, 2000).replace(/\n/g, ' | ');
       debugLog.push('page text (2k): ' + pageSample);
+      debugLog.push('commentElements count: ' + commentElements.length);
+      // Dump comment element class names and text snippets for debugging
+      if (commentElements.length === 0) {
+        // Try to find what elements contain comment-like text
+        var allEls = document.querySelectorAll('div, p, span, li, td');
+        var commentLike = [];
+        for (var ali = 0; ali < allEls.length && commentLike.length < 10; ali++) {
+          var elTxt = (allEls[ali].textContent || '').trim();
+          if (elTxt.length > 50 && elTxt.length < 2000 && /\d{1,2}\/\d{1,2}\/\d{2,4}|AM|PM/i.test(elTxt)) {
+            commentLike.push(allEls[ali].tagName + '.' + (allEls[ali].className || '').toString().substring(0, 40) + ': ' + elTxt.substring(0, 80));
+          }
+        }
+        debugLog.push('comment-like elements: ' + commentLike.length);
+        for (var cli = 0; cli < commentLike.length; cli++) {
+          debugLog.push('  el[' + cli + ']: ' + commentLike[cli]);
+        }
+      }
+      debugLog.push('fullComment source: ' + (fullComment ? 'DOM' : (rawText.match ? 'rawText' : 'none')));
       debugLog.push('country detected: ' + (country || 'NULL'));
       debugLog.push('fullComment: ' + (fullComment ? fullComment.substring(0, 100) : 'NULL'));
       // Check if AEST/CEST etc. appears in rawText
