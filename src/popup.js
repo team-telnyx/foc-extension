@@ -132,25 +132,33 @@ fetchBtn.addEventListener('click', async () => {
   var ltEl = document.getElementById('previewLt');
   if (order.ltComparison && order.ltComparison.ltLabel) {
     var cmp = order.ltComparison;
-    var icon, color, text;
+    var bgColor, borderColor, textColor, icon, text;
     if (cmp.match === true) {
-      icon = '✅'; color = '#68d391';
+      // Full match: date + time both match → GREEN
+      icon = '✅'; bgColor = 'rgba(104,211,145,0.15)'; borderColor = '#68d391'; textColor = '#68d391';
       text = icon + ' ' + cmp.ltLabel + ' = ' + cmp.cstLabel;
     } else if (cmp.match === false) {
       if (cmp.dateMatch === false) {
-        // Date mismatch — the converted date differs from FOC date
-        icon = '❌'; color = '#fc5c65';
-        text = icon + ' ' + cmp.ltLabel + ' → ' + cmp.cstLabel + ' (date mismatch!)';
+        // Date mismatch — but does time match?
+        if (cmp.timeDiffMin !== undefined && cmp.timeDiffMin <= 2) {
+          // Date wrong, time right → YELLOW (partial match)
+          icon = '⚠️'; bgColor = 'rgba(237,183,61,0.15)'; borderColor = '#edb73d'; textColor = '#edb73d';
+          text = icon + ' ' + cmp.ltLabel + ' → ' + cmp.cstLabel + ' (date mismatch)';
+        } else {
+          // Both date and time wrong → RED
+          icon = '❌'; bgColor = 'rgba(252,92,101,0.15)'; borderColor = '#fc5c65'; textColor = '#fc5c65';
+          text = icon + ' ' + cmp.ltLabel + ' → ' + cmp.cstLabel + ' (date & time mismatch)';
+        }
       } else {
-        // Date matches but time differs
-        icon = '⚠️'; color = '#ed8936';
+        // Date matches but time differs → YELLOW (partial match)
+        icon = '⚠️'; bgColor = 'rgba(237,183,61,0.15)'; borderColor = '#edb73d'; textColor = '#edb73d';
         text = icon + ' ' + cmp.ltLabel + ' ≠ ' + cmp.cstLabel + ' (time off by ' + cmp.timeDiffMin + ' min)';
       }
     } else {
-      icon = '❓'; color = '#a0aec0';
+      icon = '❓'; bgColor = 'transparent'; borderColor = 'transparent'; textColor = '#a0aec0';
       text = icon + ' ' + (cmp.error || 'Unknown');
     }
-    ltEl.innerHTML = '<span style="color:' + color + '">' + text + '</span>';
+    ltEl.innerHTML = '<span style="color:' + textColor + ';background:' + bgColor + ';border-left:3px solid ' + borderColor + ';padding:4px 8px;border-radius:4px;display:inline-block">' + text + '</span>';
     ltRow.style.display = 'flex';
   } else {
     ltRow.style.display = 'none';
