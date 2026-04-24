@@ -32,7 +32,7 @@ async function lookupAndRead(srId) {
     if (tabResult.focDate) {
       // ── LT → CST comparison ──
       var ltSource = tabResult.fullComment || tabResult.comment;
-      var ltTime = parseLocalTimeFromComment(ltSource);
+      var ltTime = parseLocalTimeFromComment(ltSource, tabResult.country);
       if (ltTime && tabResult.country) {
         var comparison = compareLtWithFoc(tabResult.focDate, ltTime, tabResult.country);
         tabResult.ltComparison = comparison;
@@ -659,8 +659,13 @@ const TZ_ABBREV = {
 
 // ─── LT → CST Comparison ──────────────────────────────────────────────────────
 
-function parseLocalTimeFromComment(comment) {
+function parseLocalTimeFromComment(comment, country) {
   if (!comment) return null;
+  
+  // Countries that use MM/DD format (month first) — default assumption
+  // All others default to DD/MM (day first) when ambiguous
+  var MMDD_COUNTRIES = ['US', 'PH', 'CA', 'PR', 'GU', 'MP', 'AS', 'FM', 'MH', 'PW'];
+  var useMonthFirst = country && MMDD_COUNTRIES.indexOf(country) !== -1;
   
   // Extract the date from the comment text first
   // Patterns: "04/24/2026", "04/24/26", "4/24/2026", "24/4/26", "2026-04-24"
@@ -674,7 +679,7 @@ function parseLocalTimeFromComment(comment) {
     commentYear = yr;
     // Smart detection: if first number > 12, it must be DD/MM (day first)
     // If second number > 12, it must be MM/DD (month first)
-    // If both <= 12, default to MM/DD (US format)
+    // If both <= 12, use country-based default
     if (a > 12) {
       // First number can't be a month → DD/MM format
       commentDay = a;
@@ -684,9 +689,14 @@ function parseLocalTimeFromComment(comment) {
       commentMonth = a;
       commentDay = b;
     } else {
-      // Both <= 12, ambiguous — default to MM/DD (US format)
-      commentMonth = a;
-      commentDay = b;
+      // Both <= 12, ambiguous — use country-based default
+      if (useMonthFirst) {
+        commentMonth = a;
+        commentDay = b;
+      } else {
+        commentDay = a;
+        commentMonth = b;
+      }
     }
   }
   // Also try ISO format: "2026-04-24"
