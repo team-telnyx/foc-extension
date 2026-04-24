@@ -661,6 +661,27 @@ const TZ_ABBREV = {
 
 function parseLocalTimeFromComment(comment) {
   if (!comment) return null;
+  
+  // Extract the date from the comment text first
+  // Patterns: "04/24/2026", "04/24/26", "4/24/2026", "2026-04-24"
+  var dateMatch = comment.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+  var commentYear = null, commentMonth = null, commentDay = null;
+  if (dateMatch) {
+    commentMonth = parseInt(dateMatch[1]);
+    commentDay = parseInt(dateMatch[2]);
+    commentYear = parseInt(dateMatch[3]);
+    if (commentYear < 100) commentYear += 2000; // 26 → 2026
+  }
+  // Also try ISO format: "2026-04-24"
+  if (!dateMatch) {
+    var isoDate = comment.match(/(\d{4})-(\d{2})-(\d{2})/);
+    if (isoDate) {
+      commentYear = parseInt(isoDate[1]);
+      commentMonth = parseInt(isoDate[2]);
+      commentDay = parseInt(isoDate[3]);
+    }
+  }
+  
   // Try timezone abbreviations first: "10 AM AEST", "3:00 PM CEST", "10am JST"
   var abbrevs = Object.keys(TZ_ABBREV).sort(function(a, b) { return b.length - a.length; }); // longest first
   for (var ai = 0; ai < abbrevs.length; ai++) {
@@ -673,7 +694,7 @@ function parseLocalTimeFromComment(comment) {
       var ampm = match[3].toUpperCase();
       if (ampm === 'PM' && hour !== 12) hour += 12;
       if (ampm === 'AM' && hour === 12) hour = 0;
-      return { hour: hour, minute: minute, tzAbbr: ab, tzIana: TZ_ABBREV[ab] };
+      return { hour: hour, minute: minute, tzAbbr: ab, tzIana: TZ_ABBREV[ab], year: commentYear, month: commentMonth, day: commentDay };
     }
   }
   // Fallback: "LT" (Local Time) — will use detected country for timezone
@@ -684,7 +705,7 @@ function parseLocalTimeFromComment(comment) {
   var ampm = match[3].toUpperCase();
   if (ampm === 'PM' && hour !== 12) hour += 12;
   if (ampm === 'AM' && hour === 12) hour = 0;
-  return { hour: hour, minute: minute, tzAbbr: 'LT' };
+  return { hour: hour, minute: minute, tzAbbr: 'LT', year: commentYear, month: commentMonth, day: commentDay };
 }
 
 function getTzOffsetDiff(countryTz, year, month, day) {
@@ -709,9 +730,9 @@ function getTzOffsetDiff(countryTz, year, month, day) {
 
 function compareLtWithFoc(focDateStr, ltTime, country) {
   // focDateStr = "2026-04-29T03:00:00" (CST floating)
-  // ltTime = { hour: 10, minute: 0, tzAbbr: 'AEST', tzIana: 'Australia/Sydney' }  or  { hour: 10, minute: 0, tzAbbr: 'LT' }
+  // ltTime = { hour: 8, minute: 0, tzAbbr: 'AEST', tzIana: 'Australia/Sydney', year: 2026, month: 4, day: 24 }
   // country = "AU"
-  // Returns { match: true/false, ltLabel: "10:00 AM AEST (AU)", cstLabel: "7:00 PM CST" }
+  // Returns { match: true/false, dateMatch: bool, ltLabel: "Apr 24, 8:00 AM AEST (AU)", cstLabel: "Apr 23, 5:00 PM CST" }
   
   // Use explicit timezone from abbreviation if available, otherwise fall back to country map
   var tz = (ltTime.tzIana) ? ltTime.tzIana : COUNTRY_TIMEZONES[country];
@@ -721,41 +742,109 @@ function compareLtWithFoc(focDateStr, ltTime, country) {
   var focParts = focDateStr.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
   if (!focParts) return { match: null, error: 'Invalid FOC date format' };
   
-  var yr = parseInt(focParts[1]), mo = parseInt(focParts[2]), dy = parseInt(focParts[3]);
+  var focYear = parseInt(focParts[1]), focMo = parseInt(focParts[2]), focDy = parseInt(focParts[3]);
   var focHourCST = parseInt(focParts[4]), focMinCST = parseInt(focParts[5]);
   
-  // Get the offset difference between country TZ and CST on this date
-  var offsetDiff = getTzOffsetDiff(tz, yr, mo, dy);
-  if (offsetDiff === null) return { match: null, error: 'Could not compute offset' };
+  // Determine the local date from the comment, or fall back to FOC date
+  var ltYear = (ltTime.year) ? ltTime.year : focYear;
+  var ltMo = (ltTime.month) ? ltTime.month : focMo;
+  var ltDy = (ltTime.day) ? ltTime.day : focDy;
   
-  // Convert LT to CST: CST = LT - offsetDiff
-  var ltTotalMin = ltTime.hour * 60 + ltTime.minute;
-  var cstTotalMin = ltTotalMin - offsetDiff;
+  // Convert local time to CST using Intl.DateTimeFormat
+  // Strategy: find the UTC time that, when formatted in the country TZ, gives us the local time
+  // Then format that same UTC time in CST
+  var targetHour = ltTime.hour;
+  var targetMin = ltTime.minute;
   
-  // Handle day wrap
-  while (cstTotalMin < 0) cstTotalMin += 1440;
-  while (cstTotalMin >= 1440) cstTotalMin -= 1440;
+  // Search for the UTC time on the local date (+/- 1 day to handle timezone wrapping)
+  var utcBase = Date.UTC(ltYear, ltMo - 1, ltDy, 0, 0, 0);
+  var foundUtc = null;
   
-  var convertedHour = Math.floor(cstTotalMin / 60);
-  var convertedMin = Math.round(cstTotalMin % 60);
+  // Check UTC times from 12h before to 24h after (covers all timezone offsets)
+  var countryFmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, hour: 'numeric', minute: 'numeric', hour12: false
+  });
   
-  // Format LT label
+  // Step 1: Coarse search (every 30 min) to find the approximate UTC hour
+  for (var utcOff = -12; utcOff <= 24; utcOff++) {
+    var testMs = utcBase + utcOff * 3600000;
+    var formatted = countryFmt.format(new Date(testMs));
+    var fmtMatch = formatted.match(/(\d{1,2}):(\d{2})/);
+    if (fmtMatch) {
+      var fmtH = parseInt(fmtMatch[1]);
+      if (fmtH === 24) fmtH = 0;
+      // Check if we're within 1 hour of the target
+      var diff = Math.abs(fmtH - targetHour);
+      if (diff === 0 || diff === 23) {
+        // Step 2: Fine search (every 1 min) within this hour
+        for (var fineOff = 0; fineOff < 60; fineOff++) {
+          var fineMs = testMs + fineOff * 60000;
+          var fineFmt = countryFmt.format(new Date(fineMs));
+          var fineMatch = fineFmt.match(/(\d{1,2}):(\d{2})/);
+          if (fineMatch) {
+            var fH = parseInt(fineMatch[1]);
+            if (fH === 24) fH = 0;
+            var fM = parseInt(fineMatch[2]);
+            if (fH === targetHour && fM === targetMin) {
+              foundUtc = fineMs;
+              break;
+            }
+          }
+        }
+        if (foundUtc !== null) break;
+      }
+    }
+  }
+  
+  if (foundUtc === null) return { match: null, error: 'Could not convert local time to UTC' };
+  
+  // Now format this UTC moment in CST
+  var cstDateFmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Chicago',
+    year: 'numeric', month: 'short', day: 'numeric',
+    hour: 'numeric', minute: 'numeric', hour12: true
+  });
+  var cstStr = cstDateFmt.format(new Date(foundUtc));
+  // Parse: "Apr 23, 5:00 PM"
+  var cstParsed = cstStr.match(/(\w{3})\s+(\d{1,2}),?\s*(?:\d{4},?)?\s+(\d{1,2}):(\d{2})\s+(AM|PM)/i);
+  if (!cstParsed) return { match: null, error: 'Could not parse CST time' };
+  
+  var cstMoName = cstParsed[1];
+  var cstDy = parseInt(cstParsed[2]);
+  var cstHour12 = parseInt(cstParsed[3]);
+  var cstMin = parseInt(cstParsed[4]);
+  var cstAmpm = cstParsed[5].toUpperCase();
+  var cstHour = cstHour12;
+  if (cstAmpm === 'PM' && cstHour !== 12) cstHour += 12;
+  if (cstAmpm === 'AM' && cstHour === 12) cstHour = 0;
+  
+  // Get the CST year (should be same as FOC year in most cases)
+  var cstYearFmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Chicago', year: 'numeric'
+  });
+  var cstYear = parseInt(cstYearFmt.format(new Date(foundUtc)));
+  
+  // Format labels
   var ltH12 = ltTime.hour % 12 || 12;
   var ltAmpm = ltTime.hour >= 12 ? 'PM' : 'AM';
-  var ltLabel = ltH12 + ':' + String(ltTime.minute).padStart(2, '0') + ' ' + ltAmpm + ' ' + tzLabel + ' (' + country + ')';
+  var ltTimeStr = ltH12 + ':' + String(ltTime.minute).padStart(2, '0') + ' ' + ltAmpm + ' ' + tzLabel;
+  var ltLabel;
+  if (ltTime.year && ltTime.month && ltTime.day) {
+    var ltDateObj = new Date(ltTime.year, ltTime.month - 1, ltTime.day);
+    var ltMoShort = ltDateObj.toLocaleString('en-US', { month: 'short' });
+    ltLabel = ltMoShort + ' ' + ltTime.day + ', ' + ltTimeStr + ' (' + country + ')';
+  } else {
+    ltLabel = ltTimeStr + ' (' + country + ')';
+  }
   
-  // Format converted CST label
-  var cstH12 = convertedHour % 12 || 12;
-  var cstAmpm = convertedHour >= 12 ? 'PM' : 'AM';
-  var cstLabel = cstH12 + ':' + String(convertedMin).padStart(2, '0') + ' ' + cstAmpm + ' CST';
+  var cstLabel = cstMoName + ' ' + cstDy + ', ' + cstHour12 + ':' + String(cstMin).padStart(2, '0') + ' ' + cstAmpm + ' CST';
   
-  // Compare with FOC time
-  var focTotalMin = focHourCST * 60 + focMinCST;
-  var diffMin = Math.abs(cstTotalMin - focTotalMin);
-  // Allow up to 2 minute difference for rounding
-  var match = diffMin <= 2;
+  // Compare the full datetime (date + time) with FOC
+  var dateMatch = (cstYear === focYear && cstMoName === new Date(focYear, focMo - 1, focDy).toLocaleString('en-US', { month: 'short' }) && cstDy === focDy);
+  var timeDiffMin = Math.abs(cstHour * 60 + cstMin - focHourCST * 60 - focMinCST);
+  var match = dateMatch && timeDiffMin <= 2;
   
-  return { match: match, ltLabel: ltLabel, cstLabel: cstLabel, diffMin: diffMin };
+  return { match: match, dateMatch: dateMatch, ltLabel: ltLabel, cstLabel: cstLabel, timeDiffMin: timeDiffMin };
 }
 
 // ─── Google Calendar API ──────────────────────────────────────────────────────

@@ -127,14 +127,30 @@ fetchBtn.addEventListener('click', async () => {
   var statusLabel = order.status || 'Unknown';
   statusEl.innerHTML = '<span class="status-badge ' + orderStatus + '">' + statusLabel + '</span>';
   
-  // Show LT → CST comparison if available
+  // Show D&T → CST comparison if available
   var ltRow = document.getElementById('previewLtRow');
   var ltEl = document.getElementById('previewLt');
   if (order.ltComparison && order.ltComparison.ltLabel) {
     var cmp = order.ltComparison;
-    var icon = cmp.match === true ? '✅' : cmp.match === false ? '⚠️' : '❓';
-    var color = cmp.match === true ? '#68d391' : cmp.match === false ? '#ed8936' : '#a0aec0';
-    ltEl.innerHTML = '<span style="color:' + color + '">' + icon + ' ' + cmp.ltLabel + ' = ' + cmp.cstLabel + '</span>';
+    var icon, color, text;
+    if (cmp.match === true) {
+      icon = '✅'; color = '#68d391';
+      text = icon + ' ' + cmp.ltLabel + ' = ' + cmp.cstLabel;
+    } else if (cmp.match === false) {
+      if (cmp.dateMatch === false) {
+        // Date mismatch — the converted date differs from FOC date
+        icon = '❌'; color = '#fc5c65';
+        text = icon + ' ' + cmp.ltLabel + ' → ' + cmp.cstLabel + ' (date mismatch!)';
+      } else {
+        // Date matches but time differs
+        icon = '⚠️'; color = '#ed8936';
+        text = icon + ' ' + cmp.ltLabel + ' ≠ ' + cmp.cstLabel + ' (time off by ' + cmp.timeDiffMin + ' min)';
+      }
+    } else {
+      icon = '❓'; color = '#a0aec0';
+      text = icon + ' ' + (cmp.error || 'Unknown');
+    }
+    ltEl.innerHTML = '<span style="color:' + color + '">' + text + '</span>';
     ltRow.style.display = 'flex';
   } else {
     ltRow.style.display = 'none';
