@@ -225,33 +225,36 @@ function fetchOrderFromPageContext(srId) {
         // Broader: look for comment list items or card-like containers
         commentElements = document.querySelectorAll('.comment, .note, .activity-item, .timeline-item, [class*="comment"], [class*="note"]');
       }
-      // ── Priority 1: Latest comment with AM/PM + TZ abbreviation ──
-      for (var cei = commentElements.length - 1; cei >= 0; cei--) {
-        var cText = (commentElements[cei].textContent || '').trim();
-        if (cText.length > comment.length && new RegExp('\\d+\\s*(am|pm)\\s*(' + tzAbbrRe + ')', 'i').test(cText)) {
-          fullComment = cText;
-          break;
-        }
-      }
-      // ── Priority 2: Latest comment with any AM/PM time ──
-      if (!fullComment && commentElements.length > 0) {
-        for (var cei2 = commentElements.length - 1; cei2 >= 0; cei2--) {
-          var cText2 = (commentElements[cei2].textContent || '').trim();
-          if (cText2.length > comment.length && /\d{1,2}(?::\d{2})?\s*(?:AM|PM)/i.test(cText2)) {
-            fullComment = cText2;
-            break;
-          }
-        }
-      }
-      // ── Priority 3: Latest comment with a natural language date ("29th of April", "May 15", etc.) ──
-      if (!fullComment && commentElements.length > 0) {
+      // ── Priority 1: Latest comment with a natural language date ("29th of April", "May 15", etc.) ──
+      // NL dates are more specific and usually from the most recent relevant comment
+      if (commentElements.length > 0) {
         var monthNames = 'january|february|march|april|may|june|july|august|september|october|november|december';
         var nlDateRe = new RegExp('(?:\\d{1,2}(?:st|nd|rd|th)?\\s+(?:of\\s+)?(?:' + monthNames + ')|(?:' + monthNames + ')\\s+\\d{1,2}(?:st|nd|rd|th)?)', 'i');
         for (var cei3 = commentElements.length - 1; cei3 >= 0; cei3--) {
           var cText3 = (commentElements[cei3].textContent || '').trim();
           if (cText3.length > 10 && nlDateRe.test(cText3)) {
             fullComment = cText3;
-            debugLog.push('NL date match: ' + cText3.substring(0, 80));
+            debugLog.push('NL date match (priority 1): ' + cText3.substring(0, 80));
+            break;
+          }
+        }
+      }
+      // ── Priority 2: Latest comment with AM/PM + TZ abbreviation ──
+      if (!fullComment) {
+        for (var cei = commentElements.length - 1; cei >= 0; cei--) {
+          var cText = (commentElements[cei].textContent || '').trim();
+          if (cText.length > comment.length && new RegExp('\\d+\\s*(am|pm)\\s*(' + tzAbbrRe + ')', 'i').test(cText)) {
+            fullComment = cText;
+            break;
+          }
+        }
+      }
+      // ── Priority 3: Latest comment with any AM/PM time ──
+      if (!fullComment && commentElements.length > 0) {
+        for (var cei2 = commentElements.length - 1; cei2 >= 0; cei2--) {
+          var cText2 = (commentElements[cei2].textContent || '').trim();
+          if (cText2.length > comment.length && /\d{1,2}(?::\d{2})?\s*(?:AM|PM)/i.test(cText2)) {
+            fullComment = cText2;
             break;
           }
         }
