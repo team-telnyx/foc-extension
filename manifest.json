@@ -34,6 +34,7 @@
   "background": {
     "service_worker": "src/background.js"
   },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEApBpaiYqJu5rboC4AtcqKN9rey9ygul4qrswh6Ra7I9z4iszZfZ01/HkzGHEXXLV9VxtYq5LTAoPOxmiL8A9BKewBmceLJE4NJhcBLOgR4pM5SB+KNiAVXw8MSeJqPaATMESgrtbLvKUlm+JBO7tS9mRIgy0RHhxPCI1yYPcyoNP9h2EnAMAxdJ7nEU0LnmSp7QgFQ4ziNYmH3BZm1S/rk+4GjFTiD42yGPyQp4sxI4nnnZvy9gDZbsfRe/e7UNgHzi+0fzyErULTK9KMv/zNjrXzhr9B4azDrljRLaz0X8OmpRFVNnDgL9lf10DeMd+0psMkbRCw62ET73OnR7gNOQIDAQAB",
   "oauth2": {
     "client_id": "745476448516-pk24jhdho2jeeuhkqgkpgkpr176ml423.apps.googleusercontent.com",
     "scopes": [
