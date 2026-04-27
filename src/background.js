@@ -225,7 +225,7 @@ function fetchOrderFromPageContext(srId) {
         // Broader: look for comment list items or card-like containers
         commentElements = document.querySelectorAll('.comment, .note, .activity-item, .timeline-item, [class*="comment"], [class*="note"]');
       }
-      // Iterate in reverse (newest comments last in DOM) to pick the LATEST with a time+TZ pattern
+      // ── Priority 1: Latest comment with AM/PM + TZ abbreviation ──
       for (var cei = commentElements.length - 1; cei >= 0; cei--) {
         var cText = (commentElements[cei].textContent || '').trim();
         if (cText.length > comment.length && new RegExp('\\d+\\s*(am|pm)\\s*(' + tzAbbrRe + ')', 'i').test(cText)) {
@@ -233,12 +233,25 @@ function fetchOrderFromPageContext(srId) {
           break;
         }
       }
-      // If no TZ abbreviation match, try latest comment with any AM/PM time
+      // ── Priority 2: Latest comment with any AM/PM time ──
       if (!fullComment && commentElements.length > 0) {
         for (var cei2 = commentElements.length - 1; cei2 >= 0; cei2--) {
           var cText2 = (commentElements[cei2].textContent || '').trim();
           if (cText2.length > comment.length && /\d{1,2}(?::\d{2})?\s*(?:AM|PM)/i.test(cText2)) {
             fullComment = cText2;
+            break;
+          }
+        }
+      }
+      // ── Priority 3: Latest comment with a natural language date ("29th of April", "May 15", etc.) ──
+      if (!fullComment && commentElements.length > 0) {
+        var monthNames = 'january|february|march|april|may|june|july|august|september|october|november|december';
+        var nlDateRe = new RegExp('(?:\\d{1,2}(?:st|nd|rd|th)?\\s+(?:of\\s+)?(?:' + monthNames + ')|(?:' + monthNames + ')\\s+\\d{1,2}(?:st|nd|rd|th)?)', 'i');
+        for (var cei3 = commentElements.length - 1; cei3 >= 0; cei3--) {
+          var cText3 = (commentElements[cei3].textContent || '').trim();
+          if (cText3.length > 10 && nlDateRe.test(cText3)) {
+            fullComment = cText3;
+            debugLog.push('NL date match: ' + cText3.substring(0, 80));
             break;
           }
         }
@@ -906,6 +919,44 @@ function parseLocalTimeFromComment(comment, country) {
     }
   }
   
+  // Also try natural language date: "29th of April", "April 29th", "29 April"
+  if (!dateMatch && !isoDate) {
+    var monthNames = {january:1,february:2,march:3,april:4,may:5,june:6,july:7,august:8,september:9,october:10,november:11,december:12};
+    var nlPatterns = [
+      // "29th of April", "29th of April 2026"
+      /\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?(january|february|march|april|may|june|july|august|september|october|november|december)\s*(\d{4})?\b/i,
+      // "April 29th", "April 29, 2026"
+      /\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2})(?:st|nd|rd|th)?\s*,?\s*(\d{4})?\b/i
+    ];
+    for (var nli = 0; nli < nlPatterns.length; nli++) {
+      var nlMatch = comment.match(nlPatterns[nli]);
+      if (nlMatch) {
+        if (nli === 0) {
+          // "29th of April" pattern
+          commentDay = parseInt(nlMatch[1]);
+          commentMonth = monthNames[nlMatch[2].toLowerCase()];
+          if (nlMatch[3]) commentYear = parseInt(nlMatch[3]);
+        } else {
+          // "April 29th" pattern
+          commentMonth = monthNames[nlMatch[1].toLowerCase()];
+          commentDay = parseInt(nlMatch[2]);
+          if (nlMatch[3]) commentYear = parseInt(nlMatch[3]);
+        }
+        break;
+      }
+    }
+  }
+  
+  // If we have a date but no time, assume midnight LT for comparison purposes
+  // This handles comments like "scheduled for the 29th of April"
+  if (commentDay && commentMonth && !dateMatch && !isoDate) {
+    // No numeric date was found, but we have a natural language date
+    // Default to midnight local time so the date comparison works
+    var tz = COUNTRY_TIMEZONES[country] || 'UTC';
+    var yr = commentYear || new Date().getFullYear();
+    return { hour: 0, minute: 0, tzAbbr: 'LT', year: yr, month: commentMonth, day: commentDay, dateOnly: true };
+  }
+  
   // Try timezone abbreviations first: "10 AM AEST", "3:00 PM CEST", "10am JST"
   var abbrevs = Object.keys(TZ_ABBREV).sort(function(a, b) { return b.length - a.length; }); // longest first
   for (var ai = 0; ai < abbrevs.length; ai++) {
@@ -976,6 +1027,21 @@ function compareLtWithFoc(focDateStr, ltTime, country) {
   
   // Convert local time to CST using Intl.DateTimeFormat
   // Strategy: find the UTC time that, when formatted in the country TZ, gives us the local time
+  // If we only have a date (no time), just compare the dates directly
+  if (ltTime.dateOnly) {
+    var dateMatch = (ltYear === focYear && ltMo === focMo && ltDy === focDy);
+    var monthNames = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    var ltLabel = monthNames[ltMo] + ' ' + ltDy + ', ' + ltYear + ' (date only, ' + country + ')';
+    var cstLabel = monthNames[focMo] + ' ' + focDy + ', ' + focYear + ' CST';
+    return {
+      match: dateMatch,
+      dateMatch: dateMatch,
+      ltLabel: ltLabel,
+      cstLabel: cstLabel,
+      note: 'Date-only comparison (no time in comment)'
+    };
+  }
+  
   // Then format that same UTC time in CST
   var targetHour = ltTime.hour;
   var targetMin = ltTime.minute;
