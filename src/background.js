@@ -29,6 +29,13 @@ async function lookupAndRead(srId) {
   const tabResult = await fetchViaTabApi(srId);
   if (tabResult && !tabResult.error) {
     debug.push('got data, focDate=' + (tabResult.focDate || 'null'));
+    // Propagate readDOM debug info to main debug
+    if (tabResult._debugLog) {
+      var keyLogs = tabResult._debugLog.filter(function(l) {
+        return /DIRECT SCHED MATCH|fullComment (before|after|source|final|stripped)|cBlock\[|admin block\[|commentBlocks count|adminBlocks count|Priority|Admin NL|Admin AM|Any block|DOM schedule|tz time|country regex/i.test(l);
+      });
+      if (keyLogs.length > 0) debug.push.apply(debug, keyLogs);
+    }
     if (tabResult.focDate) {
       // ── Fetch latest comment via API for accurate D&T Verify ──
       var ltSource = tabResult.fullComment || tabResult.comment;
@@ -319,7 +326,7 @@ function fetchOrderFromPageContext(srId) {
       debugLog.push('fullComment before priorities: "' + (fullComment || 'EMPTY') + '"');
       
       // ── Priority 1: Latest Telnyx Admin schedule comment with NL date ──
-      if (adminBlocks.length > 0) {
+      if (!fullComment && adminBlocks.length > 0) {
         var monthNames = 'january|february|march|april|may|june|july|august|september|october|november|december';
         var nlDateRe = new RegExp('(?:\\d{1,2}(?:st|nd|rd|th)?\\s+(?:of\\s+)?(?:' + monthNames + ')|(?:' + monthNames + ')\\s+\\d{1,2}(?:st|nd|rd|th)?)', 'i');
         for (var adi = adminBlocks.length - 1; adi >= 0; adi--) {

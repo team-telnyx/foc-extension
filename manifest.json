@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "FOC Calendar Sync",
-  "version": "1.0.25",
+  "version": "1.0.26",
   "description": "Create Google Calendar events for APAC porting orders when FOC is set.",
   "permissions": [
     "identity",
