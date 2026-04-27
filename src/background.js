@@ -261,7 +261,7 @@ function fetchOrderFromPageContext(srId) {
       
       // Filter to ONLY Telnyx Admin blocks that contain scheduling keywords
       // These are the authoritative date confirmations, not user requests
-      var scheduleKeywords = /(?:scheduled|rescheduled|updated\s+the\s+(?:date|FOC)\s+to|confirm)/i;
+      var scheduleKeywords = /(?:scheduled|rescheduled|updated\s+the\s+(?:date|FOC)\s+to|confirmed\s+(?:the\s+)?(?:FOC|date|port)|FOC\s+confirmed|date\s+confirmed|carrier\s+(?:has\s+)?(?:given\s+)?confirm|confirmation\s+for)/i;
       var adminBlocks = commentBlocks.filter(function(b) {
         return /^Telnyx Admin\s/i.test(b.trim()) && scheduleKeywords.test(b);
       });
@@ -325,7 +325,18 @@ function fetchOrderFromPageContext(srId) {
         }
       }
       
-      // ── Priority 4: Fallback to ALL comment blocks (incl. User) with NL date ──
+      // ── Priority 4: Fallback to ALL comment blocks (incl. User) with AM/PM + TZ ──
+      if (!fullComment && commentBlocks.length > 0) {
+        for (var adi4 = commentBlocks.length - 1; adi4 >= 0; adi4--) {
+          if (new RegExp('\\d+\\s*(am|pm)\\s*(' + tzAbbrRe + ')', 'i').test(commentBlocks[adi4])) {
+            fullComment = commentBlocks[adi4].trim();
+            debugLog.push('Any block AM/PM+TZ [' + adi4 + ']: ' + fullComment.substring(0, 120));
+            break;
+          }
+        }
+      }
+      
+      // ── Priority 5: Fallback to ALL comment blocks with NL date ──
       if (!fullComment && commentBlocks.length > 0) {
         var monthNames2 = 'january|february|march|april|may|june|july|august|september|october|november|december';
         var nlDateRe2 = new RegExp('(?:\\d{1,2}(?:st|nd|rd|th)?\\s+(?:of\\s+)?(?:' + monthNames2 + ')|(?:' + monthNames2 + ')\\s+\\d{1,2}(?:st|nd|rd|th)?)', 'i');
