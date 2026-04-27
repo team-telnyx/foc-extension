@@ -491,32 +491,30 @@ function fetchOrderFromPageContext(srId) {
     }
 
     // ─── Step 3: Type into the search field ────────────────────────
-    // Use document.execCommand('insertText') which simulates actual keyboard input
-    // This is the most reliable way to trigger Angular's model update
+    // Strategy: Use native setter + Angular scope + dispatch events
+    // execCommand alone doesn't always trigger Angular's model update
     searchInput.focus();
     searchInput.select(); // select any existing text
     
-    // Try execCommand first (most reliable for Angular)
-    var inserted = false;
+    // Method 1: Set value via native setter (bypasses React/Angler intercepted setters)
+    var nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    nativeSetter.call(searchInput, srId);
+    searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+    searchInput.dispatchEvent(new Event('change', { bubbles: true }));
+    searchInput.dispatchEvent(new InputEvent('input', { bubbles: true, data: srId }));
+    debugLog.push('native setter set value="' + searchInput.value + '"');
+    
+    // Method 2: Also try execCommand (simulates actual keyboard input)
     try {
-      inserted = document.execCommand('insertText', false, srId);
+      searchInput.focus();
+      searchInput.select();
+      document.execCommand('insertText', false, srId);
+      debugLog.push('execCommand also applied, value="' + searchInput.value + '"');
     } catch(e) {
       debugLog.push('execCommand failed: ' + e.message);
     }
     
-    if (!inserted || searchInput.value !== srId) {
-      debugLog.push('execCommand didn\'t work (value="' + searchInput.value + '"), trying native setter');
-      // Fallback: native setter + events
-      var nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-      nativeSetter.call(searchInput, srId);
-      searchInput.dispatchEvent(new Event('input', { bubbles: true }));
-      searchInput.dispatchEvent(new Event('change', { bubbles: true }));
-      searchInput.dispatchEvent(new InputEvent('input', { bubbles: true, data: srId }));
-    } else {
-      debugLog.push('execCommand inserted value="' + searchInput.value + '"');
-    }
-    
-    // Also try Angular scope if available
+    // Method 3: Angular scope direct model update (most reliable for Angular apps)
     try {
       var ngScope = window.angular && window.angular.element(searchInput).scope();
       if (ngScope) {
@@ -543,7 +541,7 @@ function fetchOrderFromPageContext(srId) {
     debugLog.push('search input value after set: "' + searchInput.value + '"');
 
     // Small delay to let Angular's digest cycle pick up the new value
-    await new Promise(function(r) { setTimeout(r, 500); });
+    await new Promise(function(r) { setTimeout(r, 1000); });
 
     // ─── Step 4: Click the Search button ──────────────────────────
     // Find the Search button that's a sibling of this specific input
@@ -566,23 +564,12 @@ function fetchOrderFromPageContext(srId) {
     }
     
     if (!searchBtn) {
-      debugLog.push('no Search button found near input');
-      // Try pressing Enter instead
+      debugLog.push('no Search button found near input, pressing Enter');
       searchInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, bubbles: true }));
       searchInput.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', keyCode: 13, bubbles: true }));
     } else {
       searchBtn.click();
       debugLog.push('clicked Search button');
-    }
-
-    if (searchBtn) {
-      searchBtn.click();
-      debugLog.push('clicked Search button');
-    } else {
-      // Try Enter key
-      searchInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, bubbles: true }));
-      searchInput.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', keyCode: 13, bubbles: true }));
-      debugLog.push('no Search button, pressed Enter');
     }
 
     // ─── Step 4: Wait for results and find the right link ──────────
