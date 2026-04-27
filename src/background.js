@@ -225,30 +225,63 @@ function fetchOrderFromPageContext(srId) {
         // Broader: look for comment list items or card-like containers
         commentElements = document.querySelectorAll('.comment, .note, .activity-item, .timeline-item, [class*="comment"], [class*="note"]');
       }
-      // ── Priority 1: Split rawText into comment blocks, find latest with NL date ──
+      // ── Split rawText into comment blocks using timestamp delimiters ──
       // DOM commentElements don't respect chronological order; rawText splitting does
       var commentSplitRe = /(?=(?:User|Telnyx Admin)\s+\d{1,2}\/\d{1,2}\/\d{2,4}\s+at\s+\d{1,2}:\d{2}(?:AM|PM)?)/gi;
       var commentBlocks = rawText.split(commentSplitRe).filter(function(b) { return b.trim().length > 5; });
       debugLog.push('commentBlocks split: ' + commentBlocks.length);
       
-      if (commentBlocks.length > 0) {
+      // Filter to ONLY Telnyx Admin blocks that contain scheduling keywords
+      // These are the authoritative date confirmations, not user requests
+      var scheduleKeywords = /(?:scheduled|rescheduled|updated\s+the\s+(?:date|FOC)\s+to|confirm)/i;
+      var adminBlocks = commentBlocks.filter(function(b) {
+        return /^Telnyx Admin\s/i.test(b.trim()) && scheduleKeywords.test(b);
+      });
+      debugLog.push('admin schedule blocks: ' + adminBlocks.length);
+      
+      // ── Priority 1: Latest Telnyx Admin schedule comment with NL date ──
+      if (adminBlocks.length > 0) {
         var monthNames = 'january|february|march|april|may|june|july|august|september|october|november|december';
         var nlDateRe = new RegExp('(?:\\d{1,2}(?:st|nd|rd|th)?\\s+(?:of\\s+)?(?:' + monthNames + ')|(?:' + monthNames + ')\\s+\\d{1,2}(?:st|nd|rd|th)?)', 'i');
-        for (var nbi = commentBlocks.length - 1; nbi >= 0; nbi--) {
-          if (nlDateRe.test(commentBlocks[nbi])) {
-            fullComment = commentBlocks[nbi].trim();
-            debugLog.push('NL date in comment block [' + nbi + ']: ' + fullComment.substring(0, 120));
+        for (var adi = adminBlocks.length - 1; adi >= 0; adi--) {
+          if (nlDateRe.test(adminBlocks[adi])) {
+            fullComment = adminBlocks[adi].trim();
+            debugLog.push('Admin NL date [' + adi + ']: ' + fullComment.substring(0, 120));
             break;
           }
         }
       }
       
-      // ── Priority 2: Latest comment block with AM/PM + TZ abbreviation ──
+      // ── Priority 2: Latest Telnyx Admin schedule comment with AM/PM + TZ ──
+      if (!fullComment && adminBlocks.length > 0) {
+        for (var adi2 = adminBlocks.length - 1; adi2 >= 0; adi2--) {
+          if (new RegExp('\\d+\\s*(am|pm)\\s*(' + tzAbbrRe + ')', 'i').test(adminBlocks[adi2])) {
+            fullComment = adminBlocks[adi2].trim();
+            debugLog.push('Admin AM/PM+TZ [' + adi2 + ']');
+            break;
+          }
+        }
+      }
+      
+      // ── Priority 3: Latest Telnyx Admin schedule comment with any date (numeric) ──
+      if (!fullComment && adminBlocks.length > 0) {
+        for (var adi3 = adminBlocks.length - 1; adi3 >= 0; adi3--) {
+          if (/\d{1,2}\/\d{1,2}\/\d{2,4}/.test(adminBlocks[adi3])) {
+            fullComment = adminBlocks[adi3].trim();
+            debugLog.push('Admin numeric date [' + adi3 + ']');
+            break;
+          }
+        }
+      }
+      
+      // ── Priority 4: Fallback to ALL comment blocks (incl. User) with NL date ──
       if (!fullComment && commentBlocks.length > 0) {
-        for (var nbi2 = commentBlocks.length - 1; nbi2 >= 0; nbi2--) {
-          if (new RegExp('\\d+\\s*(am|pm)\\s*(' + tzAbbrRe + ')', 'i').test(commentBlocks[nbi2])) {
-            fullComment = commentBlocks[nbi2].trim();
-            debugLog.push('AM/PM+TZ in comment block [' + nbi2 + ']');
+        var monthNames2 = 'january|february|march|april|may|june|july|august|september|october|november|december';
+        var nlDateRe2 = new RegExp('(?:\\d{1,2}(?:st|nd|rd|th)?\\s+(?:of\\s+)?(?:' + monthNames2 + ')|(?:' + monthNames2 + ')\\s+\\d{1,2}(?:st|nd|rd|th)?)', 'i');
+        for (var nbi = commentBlocks.length - 1; nbi >= 0; nbi--) {
+          if (nlDateRe2.test(commentBlocks[nbi])) {
+            fullComment = commentBlocks[nbi].trim();
+            debugLog.push('Any block NL date [' + nbi + ']: ' + fullComment.substring(0, 120));
             break;
           }
         }
