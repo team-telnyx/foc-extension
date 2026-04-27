@@ -257,7 +257,26 @@ function fetchOrderFromPageContext(srId) {
         }
       }
       
-      // If no dedicated element, search the full page text for time + timezone patterns
+      // ── rawText-based strategies (when no DOM comment elements matched) ──
+      // Split rawText into individual comments using timestamp delimiters
+      // Pattern: "User MM/DD/YY at H:MM" or "Telnyx Admin MM/DD/YY at H:MM"
+      var commentSplitRe = /(?=(?:User|Telnyx Admin)\s+\d{1,2}\/\d{1,2}\/\d{2,4}\s+at\s+\d{1,2}:\d{2}(?:AM|PM)?)/gi;
+      var commentBlocks = rawText.split(commentSplitRe).filter(function(b) { return b.trim().length > 5; });
+      debugLog.push('commentBlocks split: ' + commentBlocks.length);
+      
+      if (!fullComment && commentBlocks.length > 0) {
+        // ── Priority: Latest comment block with a natural language date ──
+        var monthNames2 = 'january|february|march|april|may|june|july|august|september|october|november|december';
+        var nlDateRe2 = new RegExp('(?:\\d{1,2}(?:st|nd|rd|th)?\\s+(?:of\\s+)?(?:' + monthNames2 + ')|(?:' + monthNames2 + ')\\s+\\d{1,2}(?:st|nd|rd|th)?)', 'i');
+        for (var nbi = commentBlocks.length - 1; nbi >= 0; nbi--) {
+          if (nlDateRe2.test(commentBlocks[nbi])) {
+            fullComment = commentBlocks[nbi].trim();
+            debugLog.push('NL date in comment block [' + nbi + ']: ' + fullComment.substring(0, 80));
+            break;
+          }
+        }
+      }
+      
       if (!fullComment) {
         // Look for the sentence containing "X AM/PM [TZ_ABBREV]" — prefer LAST (newest) match
         var ltRe = new RegExp('[^.!?]*\\d{1,2}(?::\\d{2})?\\s*(?:AM|PM)\\s*(?:' + tzAbbrRe + ')[^.!?]*[.!?]', 'gi');
