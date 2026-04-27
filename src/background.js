@@ -273,11 +273,9 @@ function fetchOrderFromPageContext(srId) {
       // ── Priority 3: Latest Telnyx Admin schedule comment with any date (numeric) ──
       if (!fullComment && adminBlocks.length > 0) {
         for (var adi3 = adminBlocks.length - 1; adi3 >= 0; adi3--) {
-          if (/\d{1,2}\/\d{1,2}\/\d{2,4}/.test(adminBlocks[adi3])) {
-            fullComment = adminBlocks[adi3].trim();
-            debugLog.push('Admin numeric date [' + adi3 + ']');
+          fullComment = adminBlocks[adi3].trim();
+            debugLog.push('Admin any date [' + adi3 + ']');
             break;
-          }
         }
       }
       
@@ -405,7 +403,14 @@ function fetchOrderFromPageContext(srId) {
       }
       debugLog.push('fullComment source: ' + (fullComment ? 'DOM' : (rawText.match ? 'rawText' : 'none')));
       debugLog.push('country detected: ' + (country || 'NULL'));
-      debugLog.push('fullComment: ' + (fullComment ? fullComment.substring(0, 100) : 'NULL'));
+      // Strip "Telnyx Admin/User MM/DD/YY at H:MMAMPM" prefix from fullComment
+      // so the timestamp's numeric date doesn't override NL dates in the body
+      if (fullComment) {
+        var stripped = fullComment.replace(/^(?:Telnyx Admin|User)\s+\d{1,2}\/\d{1,2}\/\d{2,4}\s+at\s+\d{1,2}:\d{2}(?:AM|PM)?\s*/i, '');
+        debugLog.push('fullComment stripped: ' + stripped.substring(0, 120));
+        fullComment = stripped || fullComment;  // Don't empty it if strip fails
+      }
+      debugLog.push('fullComment final: ' + (fullComment ? fullComment.substring(0, 100) : 'NULL'));
       // Check if AEST/CEST etc. appears in rawText
       var tzInText = rawText.match(/\d{1,2}(?::\d{2})?\s*(?:AM|PM)\s*(?:AEST|AEDT|CEST|CET|JST|KST|SGT|HKT|NZST|NZDT|LT)/i);
       debugLog.push('tz time in rawText: ' + (tzInText ? tzInText[0] : 'NULL'));
