@@ -356,21 +356,26 @@ function fetchOrderFromPageContext(srId) {
       }
       
       // ── Priority 3: DOM-based fallback (only if commentBlocks splitting failed) ──
+      // Only consider DOM elements that have scheduling keywords
       if (!fullComment && commentElements.length > 0) {
+        var domScheduleKeywords = /(?:scheduled|rescheduled|updated\s+the\s+(?:date|FOC)\s+to|confirmed\s+(?:the\s+)?(?:FOC|date|port)|FOC\s+confirmed|date\s+confirmed|carrier\s+(?:has\s+)?(?:given\s+)?confirm|confirmation\s+for)/i;
         for (var cei = commentElements.length - 1; cei >= 0; cei--) {
           var cText = (commentElements[cei].textContent || '').trim();
-          if (cText.length > comment.length && new RegExp('\\d+\\s*(am|pm)\\s*(' + tzAbbrRe + ')', 'i').test(cText)) {
+          if (cText.length > comment.length && domScheduleKeywords.test(cText) && new RegExp('\\d+\\s*(am|pm)\\s*(' + tzAbbrRe + ')', 'i').test(cText)) {
             fullComment = cText;
+            debugLog.push('DOM schedule+AM/PM+TZ [' + cei + ']: ' + fullComment.substring(0, 120));
             break;
           }
         }
       }
-      // ── Priority 4: DOM-based any AM/PM time ──
+      // ── Priority 4: DOM-based any AM/PM time with schedule keyword ──
       if (!fullComment && commentElements.length > 0) {
+        var domScheduleKeywords2 = /(?:scheduled|rescheduled|updated\s+the\s+(?:date|FOC)\s+to|confirmed\s+(?:the\s+)?(?:FOC|date|port)|FOC\s+confirmed|date\s+confirmed|carrier\s+(?:has\s+)?(?:given\s+)?confirm|confirmation\s+for)/i;
         for (var cei2 = commentElements.length - 1; cei2 >= 0; cei2--) {
           var cText2 = (commentElements[cei2].textContent || '').trim();
-          if (cText2.length > comment.length && /\d{1,2}(?::\d{2})?\s*(?:AM|PM)/i.test(cText2)) {
+          if (cText2.length > comment.length && domScheduleKeywords2.test(cText2) && /\d{1,2}(?::\d{2})?\s*(?:AM|PM)/i.test(cText2)) {
             fullComment = cText2;
+            debugLog.push('DOM schedule+AM/PM [' + cei2 + ']: ' + fullComment.substring(0, 120));
             break;
           }
         }

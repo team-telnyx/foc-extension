@@ -8,6 +8,12 @@ const createBtn = document.getElementById('createBtn');
 const statusEl = document.getElementById('status');
 const previewEl = document.getElementById('preview');
 const detectedBadge = document.getElementById('detectedBadge');
+const versionBadge = document.getElementById('versionBadge');
+
+// Display version from manifest
+if (versionBadge && chrome.runtime.getManifest) {
+  versionBadge.textContent = 'v' + chrome.runtime.getManifest().version;
+}
 
 // ─── On load: check if any PortingAdmin tab is open ─────────────────────────
 chrome.tabs.query({ url: 'https://portingadmin.telnyx.com/*' }, (tabs) => {
