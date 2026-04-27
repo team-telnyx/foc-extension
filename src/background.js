@@ -230,6 +230,10 @@ function fetchOrderFromPageContext(srId) {
       var commentSplitRe = /(?=(?:User|Telnyx Admin)\s+\d{1,2}\/\d{1,2}\/\d{2,4}\s+at\s+\d{1,2}:\d{2}(?:AM|PM)?)/gi;
       var commentBlocks = rawText.split(commentSplitRe).filter(function(b) { return b.trim().length > 5; });
       debugLog.push('commentBlocks split: ' + commentBlocks.length);
+      if (commentBlocks.length > 0) {
+        debugLog.push('first block (80): ' + commentBlocks[0].substring(0, 80));
+        debugLog.push('last block (80): ' + commentBlocks[commentBlocks.length - 1].substring(0, 80));
+      }
       
       // Filter to ONLY Telnyx Admin blocks that contain scheduling keywords
       // These are the authoritative date confirmations, not user requests
@@ -238,6 +242,9 @@ function fetchOrderFromPageContext(srId) {
         return /^Telnyx Admin\s/i.test(b.trim()) && scheduleKeywords.test(b);
       });
       debugLog.push('admin schedule blocks: ' + adminBlocks.length);
+      if (adminBlocks.length > 0) {
+        debugLog.push('last admin block (120): ' + adminBlocks[adminBlocks.length - 1].substring(0, 120));
+      }
       
       // ── Priority 1: Latest Telnyx Admin schedule comment with NL date ──
       if (adminBlocks.length > 0) {
