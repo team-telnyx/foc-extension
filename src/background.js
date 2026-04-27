@@ -245,9 +245,29 @@ function fetchOrderFromPageContext(srId) {
       var adminBlocks = commentBlocks.filter(function(b) {
         return /^Telnyx Admin\s/i.test(b.trim()) && scheduleKeywords.test(b);
       });
+      
+      // Sort admin blocks by their timestamp so [0]=oldest, [N]=newest
+      // Parse "Telnyx Admin MM/DD/YY at H:MMAMPM" prefix from each block
+      adminBlocks.sort(function(a, b) {
+        var tsRe = /^(?:Telnyx Admin|User)\s+(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s+at\s+(\d{1,2}):(\d{2})(AM|PM)?/i;
+        var mA = a.match(tsRe), mB = b.match(tsRe);
+        if (!mA || !mB) return 0;
+        var parseTs = function(m) {
+          var mo = parseInt(m[1]), dy = parseInt(m[2]), yr = parseInt(m[3]);
+          if (yr < 100) yr += 2000;
+          var hr = parseInt(m[4]), mn = parseInt(m[5]), ap = (m[6] || '').toUpperCase();
+          if (ap === 'PM' && hr !== 12) hr += 12;
+          if (ap === 'AM' && hr === 12) hr = 0;
+          return yr * 100000000 + mo * 1000000 + dy * 10000 + hr * 100 + mn;
+        };
+        return parseTs(mA) - parseTs(mB);
+      });
+      
       debugLog.push('admin schedule blocks: ' + adminBlocks.length);
       if (adminBlocks.length > 0) {
-        debugLog.push('last admin block (120): ' + adminBlocks[adminBlocks.length - 1].substring(0, 120));
+        for (var abdi = 0; abdi < adminBlocks.length; abdi++) {
+          debugLog.push('admin block[' + abdi + '] (80): ' + adminBlocks[abdi].substring(0, 80));
+        }
       }
       
       // ── Priority 1: Latest Telnyx Admin schedule comment with NL date ──
@@ -268,18 +288,20 @@ function fetchOrderFromPageContext(srId) {
         for (var adi2 = adminBlocks.length - 1; adi2 >= 0; adi2--) {
           if (new RegExp('\\d+\\s*(am|pm)\\s*(' + tzAbbrRe + ')', 'i').test(adminBlocks[adi2])) {
             fullComment = adminBlocks[adi2].trim();
-            debugLog.push('Admin AM/PM+TZ [' + adi2 + ']');
+            debugLog.push('Admin AM/PM+TZ [' + adi2 + ']: ' + fullComment.substring(0, 120));
             break;
           }
         }
       }
       
-      // ── Priority 3: Latest Telnyx Admin schedule comment with any date (numeric) ──
+      // ── Priority 3: Latest Telnyx Admin schedule comment with AM/PM (no TZ) ──
       if (!fullComment && adminBlocks.length > 0) {
         for (var adi3 = adminBlocks.length - 1; adi3 >= 0; adi3--) {
-          fullComment = adminBlocks[adi3].trim();
-            debugLog.push('Admin any date [' + adi3 + ']');
+          if (/\d{1,2}(?::\d{2})?\s*(?:AM|PM)/i.test(adminBlocks[adi3])) {
+            fullComment = adminBlocks[adi3].trim();
+            debugLog.push('Admin AM/PM only [' + adi3 + ']: ' + fullComment.substring(0, 120));
             break;
+          }
         }
       }
       
