@@ -189,6 +189,7 @@ function fetchOrderFromPageContext(srId) {
       }
 
       var focDate = null;
+      // Method 1: Find "Actual FOC" label and grab the date from next lines
       for (var fi = 0; fi < lines.length; fi++) {
         if (/actual\s+foc/i.test(lines[fi])) {
           for (var fj = fi; fj <= Math.min(fi + 3, lines.length - 1); fj++) {
@@ -196,6 +197,25 @@ function fetchOrderFromPageContext(srId) {
             if (dm) { focDate = dm[1]; break; }
           }
           if (focDate) break;
+        }
+      }
+      // Method 2: If not found, search rawText directly for FOC date patterns
+      if (!focDate) {
+        // Look for a date near "FOC" text in the raw text
+        var focNearby = rawText.match(/actual\s+foc[^]*?(\d{1,2}\/\d{1,2}\/\d{4}\s+\d{1,2}:\d{2}\s*[AP]M)/i);
+        if (focNearby) { focDate = focNearby[1]; }
+      }
+      // Method 3: Try reading from Angular scope or input fields
+      if (!focDate) {
+        // Look for any element with ng-model containing "foc" or "actualFoc"
+        var focInputs = document.querySelectorAll('input, span, div, td');
+        for (var fii = 0; fii < focInputs.length; fii++) {
+          var ngm = (focInputs[fii].getAttribute('ng-model') || '').toLowerCase();
+          var txt = (focInputs[fii].textContent || focInputs[fii].value || '').trim();
+          if ((ngm.includes('foc') || ngm.includes('actual_foc')) && /\d{1,2}\/\d{1,2}\/\d{4}/.test(txt)) {
+            var dm2 = txt.match(/(\d{1,2}\/\d{1,2}\/\d{4}\s+\d{1,2}:\d{2}\s*[AP]M)/i);
+            if (dm2) { focDate = dm2[1]; break; }
+          }
         }
       }
       if (focDate) {
@@ -740,12 +760,19 @@ function fetchOrderFromPageContext(srId) {
     
     // If FOC date not found, the page might not be fully rendered yet — retry
     if (!result.focDate) {
-      debugLog.push('FOC not found on first read, waiting and retrying...');
-      await new Promise(function(r) { setTimeout(r, 4000); });
+      debugLog.push('FOC not found on first read, waiting 6s and retrying...');
+      await new Promise(function(r) { setTimeout(r, 6000); });
       result = readDOM(srId);
     }
     if (!result.focDate) {
-      debugLog.push('FOC still not found, waiting more...');
+      debugLog.push('FOC still not found, waiting 5s more...');
+      await new Promise(function(r) { setTimeout(r, 5000); });
+      result = readDOM(srId);
+    }
+    if (!result.focDate) {
+      debugLog.push('FOC still not found after 3 attempts, trying scroll...');
+      // Scroll down and retry in case FOC date is below the fold
+      window.scrollTo(0, document.body.scrollHeight / 2);
       await new Promise(function(r) { setTimeout(r, 3000); });
       result = readDOM(srId);
     }
