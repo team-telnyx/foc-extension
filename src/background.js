@@ -87,8 +87,12 @@ async function fetchViaTabApi(srId) {
         resolve(result);
       }
 
+      // Track loading progress for debugging
+      var loadLog = [];
+
       chrome.tabs.onUpdated.addListener(function listener(updatedTabId, info) {
         if (updatedTabId !== tabId) return;
+        loadLog.push(info.status + (info.url ? ' -> ' + info.url : ''));
         if (info.status !== 'complete') return;
         chrome.tabs.onUpdated.removeListener(listener);
 
@@ -100,7 +104,7 @@ async function fetchViaTabApi(srId) {
             args: [srId]
           }, function(results) {
             if (chrome.runtime.lastError || !results || !results[0]) {
-              cleanup({ error: 'Could not execute script in PortingAdmin context.', _debugLog: ['execute failed: ' + (chrome.runtime.lastError?.message || 'no results')] });
+              cleanup({ error: 'Could not execute script in PortingAdmin context.', _debugLog: ['execute failed: ' + (chrome.runtime.lastError?.message || 'no results'), 'loadLog: ' + loadLog.join(', ')] });
               return;
             }
             cleanup(results[0].result);
@@ -109,8 +113,8 @@ async function fetchViaTabApi(srId) {
       });
 
       setTimeout(function() {
-        cleanup({ error: 'Timed out connecting to PortingAdmin.', _debugLog: ['30s timeout'] });
-      }, 30000);
+        cleanup({ error: 'Timed out connecting to PortingAdmin.', _debugLog: ['60s timeout', 'loadLog: ' + loadLog.join(', ')] });
+      }, 60000);
     });
   });
 }
