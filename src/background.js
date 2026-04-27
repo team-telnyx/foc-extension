@@ -283,12 +283,18 @@ function fetchOrderFromPageContext(srId) {
         return parseTs(mA) - parseTs(mB);
       });
       
-      debugLog.push('admin schedule blocks: ' + adminBlocks.length);
+      // ── Before priorities: log all comment blocks for debugging ──
+      debugLog.push('commentBlocks count: ' + commentBlocks.length);
+      for (var cbi = 0; cbi < Math.min(commentBlocks.length, 10); cbi++) {
+        debugLog.push('cBlock[' + cbi + ']: ' + commentBlocks[cbi].substring(0, 80).replace(/\n/g, ' '));
+      }
+      debugLog.push('adminBlocks count: ' + adminBlocks.length);
       if (adminBlocks.length > 0) {
         for (var abdi = 0; abdi < adminBlocks.length; abdi++) {
-          debugLog.push('admin block[' + abdi + '] (80): ' + adminBlocks[abdi].substring(0, 80));
+          debugLog.push('admin block[' + abdi + '] (80): ' + adminBlocks[abdi].substring(0, 80).replace(/\n/g, ' '));
         }
       }
+      debugLog.push('fullComment before priorities: "' + (fullComment || 'EMPTY') + '"');
       
       // ── Priority 1: Latest Telnyx Admin schedule comment with NL date ──
       if (adminBlocks.length > 0) {
@@ -462,6 +468,7 @@ function fetchOrderFromPageContext(srId) {
       debugLog.push('country detected: ' + (country || 'NULL'));
       // Strip "Telnyx Admin/User MM/DD/YY at H:MMAMPM" prefix from fullComment
       // so the timestamp's numeric date doesn't override NL dates in the body
+      debugLog.push('fullComment after all priorities: "' + (fullComment ? fullComment.substring(0, 120) : 'EMPTY') + '"');
       if (fullComment) {
         var stripped = fullComment.replace(/^(?:Telnyx Admin|User)\s+\d{1,2}\/\d{1,2}\/\d{2,4}\s+at\s+\d{1,2}:\d{2}(?:AM|PM)?\s*/i, '');
         debugLog.push('fullComment stripped: ' + stripped.substring(0, 120));
