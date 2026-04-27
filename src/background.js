@@ -32,17 +32,22 @@ async function lookupAndRead(srId) {
     if (tabResult.focDate) {
       // ── Fetch latest comment via API for accurate D&T Verify ──
       var ltSource = tabResult.fullComment || tabResult.comment;
+      debug.push('uuids: ' + JSON.stringify(tabResult._uuids));
       if (tabResult._uuids && tabResult._uuids.subRequestId) {
         try {
           var apiResult = await fetchLatestCommentViaApi(tabResult._uuids);
-          if (apiResult.debug) debug.push.apply(debug, apiResult.debug);
-          if (apiResult.text) {
+          if (apiResult && apiResult.debug) debug.push.apply(debug, apiResult.debug);
+          if (apiResult && apiResult.text) {
             debug.push('API comment used: ' + apiResult.text.substring(0, 300));
             ltSource = apiResult.text;  // Prefer API-sourced latest comment
+          } else {
+            debug.push('API returned no text, using rawText fallback');
           }
         } catch (e) {
           debug.push('API comment fetch failed: ' + e.message);
         }
+      } else {
+        debug.push('no uuids available, skipping API fetch');
       }
       // ── LT → CST comparison ──
       var ltTime = parseLocalTimeFromComment(ltSource, tabResult.country);
@@ -821,16 +826,23 @@ async function fetchLatestCommentViaApi(uuids) {
     apiDebug.push('API first: ' + JSON.stringify(comments[0]).substring(0, 150));
     apiDebug.push('API last: ' + JSON.stringify(comments[comments.length - 1]).substring(0, 150));
     
-    // Sort by created_at descending to get the latest
-    comments.sort(function(a, b) {
-      var aTime = a.created_at || a.createdAt || a.created_at_date || '';
-      var bTime = b.created_at || b.createdAt || b.created_at_date || '';
-      if (!aTime && !bTime) return 0;
-      return new Date(bTime || 0) - new Date(aTime || 0);
-    });
+    // Simply take the LAST comment (APIs almost always return newest-last)
+    // We also try sorting by date if available, but last-item is the reliable fallback
+    if (comments.length > 1) {
+      comments.sort(function(a, b) {
+        var aTime = a.created_at || a.createdAt || a.created_at_date || a.inserted_at || a.updated_at || '';
+        var bTime = b.created_at || b.createdAt || b.created_at_date || b.inserted_at || b.updated_at || '';
+        if (aTime && bTime) {
+          return new Date(bTime) - new Date(aTime);  // newest first
+        }
+        return 0;
+      });
+    }
     
-    // If no date fields found, take the LAST comment (APIs often return newest last)
-    var hasDateField = comments.some(function(c) { return c.created_at || c.createdAt || c.created_at_date; });
+    // Check if sorting actually worked (has valid date fields)
+    var hasDateField = comments[0] && (comments[0].created_at || comments[0].createdAt || comments[0].created_at_date || comments[0].inserted_at || comments[0].updated_at);
+    
+    // Always take comments[0] after sort (newest first), OR last item if no dates (newest last)
     var latest = hasDateField ? comments[0] : comments[comments.length - 1];
     
     var text = latest.body || latest.text || latest.content || latest.comment || null;
