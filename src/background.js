@@ -283,7 +283,7 @@ function fetchOrderFromPageContext(srId) {
       
       // Filter to ONLY Telnyx Admin blocks that contain scheduling keywords
       // These are the authoritative date confirmations, not user requests
-      var scheduleKeywords = schedKwRe;
+      var scheduleKeywords = /(?:scheduled|rescheduled|updated\s+the\s+(?:date|FOC)\s+to|confirmed\s+(?:the\s+)?(?:FOC|date|port)|FOC\s+confirmed|date\s+confirmed|carrier\s+(?:has\s+)?(?:given\s+)?confirm|confirmation\s+for)/i;
       var adminBlocks = commentBlocks.filter(function(b) {
         return /^Telnyx Admin\s/i.test(b.trim()) && scheduleKeywords.test(b);
       });
