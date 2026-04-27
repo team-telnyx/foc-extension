@@ -259,9 +259,31 @@ function fetchOrderFromPageContext(srId) {
         debugLog.push('last block (80): ' + commentBlocks[commentBlocks.length - 1].substring(0, 80));
       }
       
+      // ── NEW: Direct rawText search for scheduling sentence with time+TZ ──
+      // This is the most reliable approach: find the LAST sentence in rawText that
+      // contains BOTH a scheduling keyword AND a time with timezone abbreviation
+      var schedKwPattern = '(?:scheduled|rescheduled|updated\\s+the\\s+(?:date|FOC)\\s+to|confirmed\\s+(?:the\\s+)?(?:FOC|date|port)|FOC\\s+confirmed|date\\s+confirmed|carrier\\s+(?:has\\s+)?(?:given\\s+)?confirm|confirmation\\s+for)';
+      // Pattern: scheduling keyword ... time AM/PM TZ (same sentence)
+      var directRe1 = new RegExp('[^.!?]*\\b' + schedKwPattern + '\\b[^.!?]*\\d{1,2}(?::\\d{2})?\\s*(?:AM|PM)\\s*(?:' + tzAbbrRe + ')\\b[^.!?]*', 'gi');
+      var directSchedMatch = rawText.match(directRe1);
+      // Also try the reverse: time+TZ first, then scheduling keyword in same sentence
+      if (!directSchedMatch) {
+        var directRe2 = new RegExp('[^.!?]*\\d{1,2}(?::\\d{2})?\\s*(?:AM|PM)\\s*(?:' + tzAbbrRe + ')\\b[^.!?]*(?:' + schedKwPattern + ')[^.!?]*', 'gi');
+        directSchedMatch = rawText.match(directRe2);
+      }
+      // Broader: scheduling keyword + time (AM/PM) in same sentence, TZ can be separate
+      if (!directSchedMatch) {
+        var directRe3 = new RegExp('[^.!?]*\\b' + schedKwPattern + '\\b[^.!?]*\\d{1,2}(?::\\d{2})?\\s*(?:AM|PM)[^.!?]*', 'gi');
+        directSchedMatch = rawText.match(directRe3);
+      }
+      if (directSchedMatch && directSchedMatch.length > 0) {
+        fullComment = directSchedMatch[directSchedMatch.length - 1].trim();
+        debugLog.push('DIRECT SCHED MATCH: ' + fullComment.substring(0, 150));
+      }
+      
       // Filter to ONLY Telnyx Admin blocks that contain scheduling keywords
       // These are the authoritative date confirmations, not user requests
-      var scheduleKeywords = /(?:scheduled|rescheduled|updated\s+the\s+(?:date|FOC)\s+to|confirmed\s+(?:the\s+)?(?:FOC|date|port)|FOC\s+confirmed|date\s+confirmed|carrier\s+(?:has\s+)?(?:given\s+)?confirm|confirmation\s+for)/i;
+      var scheduleKeywords = schedKwRe;
       var adminBlocks = commentBlocks.filter(function(b) {
         return /^Telnyx Admin\s/i.test(b.trim()) && scheduleKeywords.test(b);
       });
