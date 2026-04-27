@@ -947,6 +947,19 @@ function parseLocalTimeFromComment(comment, country) {
   // Patterns: "04/24/2026", "04/24/26", "4/24/2026", "24/4/26", "2026-04-24"
   var dateMatch = comment.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
   var commentYear = null, commentMonth = null, commentDay = null;
+  
+  // Handle malformed date like "29/42026" (missing slash between month and year)
+  // This happens when people type "29/4/2026" as "29/42026" by mistake
+  if (!dateMatch) {
+    var malformedDate = comment.match(/(\d{1,2})\/(\d{1,2})(\d{4})/);
+    if (malformedDate) {
+      var a = parseInt(malformedDate[1]);
+      var b = parseInt(malformedDate[2]);
+      var yr = parseInt(malformedDate[3]);
+      // Reconstruct as if properly formatted
+      dateMatch = [malformedDate[0], String(a), String(b), String(yr)];
+    }
+  }
   if (dateMatch) {
     var a = parseInt(dateMatch[1]);
     var b = parseInt(dateMatch[2]);
