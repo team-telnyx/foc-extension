@@ -267,25 +267,36 @@ function fetchOrderFromPageContext(srId) {
       }
       
       // ── NEW: Direct rawText search for scheduling sentence with time+TZ ──
-      // This is the most reliable approach: find the LAST sentence in rawText that
-      // contains BOTH a scheduling keyword AND a time with timezone abbreviation
+      // Search EACH commentBlock individually (not entire rawText) to prevent
+      // regex from spanning across comment boundaries and picking wrong block
       var schedKwPattern = '(?:scheduled|rescheduled|updated\\s+the\\s+(?:date|FOC)\\s+to|confirmed\\s+(?:the\\s+)?(?:FOC|date|port)|FOC\\s+confirmed|date\\s+confirmed|carrier\\s+(?:has\\s+)?(?:given\\s+)?confirm|confirmation\\s+for)';
-      // Pattern: scheduling keyword ... time AM/PM TZ (same sentence)
-      var directRe1 = new RegExp('[^.!?]*\\b' + schedKwPattern + '\\b[^.!?]*\\d{1,2}(?::\\d{2})?\\s*(?:AM|PM)\\s*(?:' + tzAbbrRe + ')\\b[^.!?]*', 'gi');
-      var directSchedMatch = rawText.match(directRe1);
-      // Also try the reverse: time+TZ first, then scheduling keyword in same sentence
-      if (!directSchedMatch) {
-        var directRe2 = new RegExp('[^.!?]*\\d{1,2}(?::\\d{2})?\\s*(?:AM|PM)\\s*(?:' + tzAbbrRe + ')\\b[^.!?]*(?:' + schedKwPattern + ')[^.!?]*', 'gi');
-        directSchedMatch = rawText.match(directRe2);
+      var directRe1 = new RegExp('\\b' + schedKwPattern + '\\b[\\s\\S]*?\\d{1,2}(?::\\d{2})?\\s*(?:AM|PM)\\s*(?:' + tzAbbrRe + ')\\b', 'i');
+      var directRe2 = new RegExp('\\d{1,2}(?::\\d{2})?\\s*(?:AM|PM)\\s*(?:' + tzAbbrRe + ')\\b[\\s\\S]*?(?:' + schedKwPattern + ')', 'i');
+      var directRe3 = new RegExp('\\b' + schedKwPattern + '\\b[\\s\\S]*?\\d{1,2}(?::\\d{2})?\\s*(?:AM|PM)\\b', 'i');
+      var directSchedMatch = null;
+      for (var dbi = commentBlocks.length - 1; dbi >= 0; dbi--) {
+        if (directRe1.test(commentBlocks[dbi])) {
+          directSchedMatch = commentBlocks[dbi];
+          debugLog.push('DIRECT SCHED MATCH (re1) block[' + dbi + ']: ' + directSchedMatch.substring(0, 150));
+          break;
+        }
+        directRe1.lastIndex = 0;
+        if (!directSchedMatch && directRe2.test(commentBlocks[dbi])) {
+          directSchedMatch = commentBlocks[dbi];
+          debugLog.push('DIRECT SCHED MATCH (re2) block[' + dbi + ']: ' + directSchedMatch.substring(0, 150));
+          break;
+        }
+        directRe2.lastIndex = 0;
+        if (!directSchedMatch && directRe3.test(commentBlocks[dbi])) {
+          directSchedMatch = commentBlocks[dbi];
+          debugLog.push('DIRECT SCHED MATCH (re3) block[' + dbi + ']: ' + directSchedMatch.substring(0, 150));
+          break;
+        }
+        directRe3.lastIndex = 0;
       }
-      // Broader: scheduling keyword + time (AM/PM) in same sentence, TZ can be separate
-      if (!directSchedMatch) {
-        var directRe3 = new RegExp('[^.!?]*\\b' + schedKwPattern + '\\b[^.!?]*\\d{1,2}(?::\\d{2})?\\s*(?:AM|PM)[^.!?]*', 'gi');
-        directSchedMatch = rawText.match(directRe3);
-      }
-      if (directSchedMatch && directSchedMatch.length > 0) {
-        fullComment = directSchedMatch[directSchedMatch.length - 1].trim();
-        debugLog.push('DIRECT SCHED MATCH: ' + fullComment.substring(0, 150));
+      if (directSchedMatch) {
+        fullComment = directSchedMatch.trim();
+        debugLog.push('DIRECT SCHED MATCH final: ' + fullComment.substring(0, 150));
       }
       
       // Filter to ONLY Telnyx Admin blocks that contain scheduling keywords
