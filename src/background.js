@@ -1493,17 +1493,13 @@ function parseDuration(comment) {
 function addHoursToFloating(dtStr, hours) {
   var parts = dtStr.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/);
   if (!parts) return dtStr;
+  // Use proper Date arithmetic to handle multi-day durations
   var yr = parseInt(parts[1]), mo = parseInt(parts[2]), dy = parseInt(parts[3]);
-  var h = parseInt(parts[4]) + Math.floor(hours);
-  var m = parseInt(parts[5]) + Math.round((hours % 1) * 60);
-  if (m >= 60) { h++; m -= 60; }
-  if (h >= 24) {
-    h -= 24;
-    var d = new Date(Date.UTC(yr, mo - 1, dy + 1));
-    yr = d.getUTCFullYear(); mo = d.getUTCMonth() + 1; dy = d.getUTCDate();
-  }
+  var h = parseInt(parts[4]), m = parseInt(parts[5]);
+  // Add hours and minutes using UTC Date object
+  var dt = new Date(Date.UTC(yr, mo - 1, dy, h, m) + hours * 3600000);
   var pad = function(n) { return String(n).padStart(2, '0'); };
-  return yr + '-' + pad(mo) + '-' + pad(dy) + 'T' + pad(h) + ':' + pad(m) + ':00';
+  return dt.getUTCFullYear() + '-' + pad(dt.getUTCMonth() + 1) + '-' + pad(dt.getUTCDate()) + 'T' + pad(dt.getUTCHours()) + ':' + pad(dt.getUTCMinutes()) + ':00';
 }
 
 async function createCalendarEvent(eventData) {
