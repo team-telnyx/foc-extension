@@ -273,8 +273,10 @@ function fetchOrderFromPageContext(srId) {
       var directRe1 = new RegExp('\\b' + schedKwPattern + '\\b[\\s\\S]*?\\d{1,2}(?::\\d{2})?\\s*(?:AM|PM)\\s*(?:' + tzAbbrRe + ')\\b', 'i');
       var directRe2 = new RegExp('\\d{1,2}(?::\\d{2})?\\s*(?:AM|PM)\\s*(?:' + tzAbbrRe + ')\\b[\\s\\S]*?(?:' + schedKwPattern + ')', 'i');
       var directRe3 = new RegExp('\\b' + schedKwPattern + '\\b[\\s\\S]*?\\d{1,2}(?::\\d{2})?\\s*(?:AM|PM)\\b', 'i');
+      // commentBlocks are in REVERSE chronological order (newest first at lower indices)
+      // So iterate FORWARD (0 → length-1) to find the newest matching block
       var directSchedMatch = null;
-      for (var dbi = commentBlocks.length - 1; dbi >= 0; dbi--) {
+      for (var dbi = 0; dbi < commentBlocks.length; dbi++) {
         if (directRe1.test(commentBlocks[dbi])) {
           directSchedMatch = commentBlocks[dbi];
           debugLog.push('DIRECT SCHED MATCH (re1) block[' + dbi + ']: ' + directSchedMatch.substring(0, 150));
