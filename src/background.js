@@ -498,7 +498,12 @@ function fetchOrderFromPageContext(srId) {
           debugLog.push('  el[' + cli + ']: ' + commentLike[cli]);
         }
       }
-      debugLog.push('fullComment source: ' + (fullComment ? 'DOM' : (rawText.match ? 'rawText' : 'none')));
+      // Track where fullComment came from
+      var fullCommentSource = 'none';
+      if (directSchedMatch && directSchedMatch.length > 0) {
+        fullCommentSource = 'DIRECT_SCHED_MATCH';
+      }
+      debugLog.push('fullComment source: ' + (fullComment ? (fullCommentSource !== 'none' ? fullCommentSource : 'PRIORITY_OR_DOM') : 'none'));
       debugLog.push('country detected: ' + (country || 'NULL'));
       // Strip "Telnyx Admin/User MM/DD/YY at H:MMAMPM" prefix from fullComment
       // so the timestamp's numeric date doesn't override NL dates in the body
