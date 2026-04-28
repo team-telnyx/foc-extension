@@ -554,7 +554,7 @@ function fetchOrderFromPageContext(srId) {
     debugLog.push('current hash: ' + window.location.hash.substring(0, 80));
     // Navigate to queue with ALL statuses — ?statuses=all does the job
     window.location.hash = '#!/queue?statuses=all';
-    await new Promise(function(r) { setTimeout(r, 5000); });
+    await new Promise(function(r) { setTimeout(r, 8000); });  // Increased from 5s to 8s
     debugLog.push('navigated to queue (statuses=all), hash: ' + window.location.hash.substring(0, 80));
 
     // ─── Step 2: Find and fill the search input ────────────────────
@@ -694,7 +694,7 @@ function fetchOrderFromPageContext(srId) {
     }
 
     // Small delay to let Angular's digest cycle pick up the new value
-    await new Promise(function(r) { setTimeout(r, 1000); });
+    await new Promise(function(r) { setTimeout(r, 2000); });  // Increased from 1s to 2s
 
     // ─── Step 4: Click the Search button ──────────────────────────
     // Find the Search button that's a sibling of this specific input
@@ -849,8 +849,43 @@ function fetchOrderFromPageContext(srId) {
       }
       
       if (!foundLink) {
-        debugLog.push('retry also failed');
-        return { error: 'Could not find ' + srId + ' in search results.', _debugLog: debugLog };
+        debugLog.push('retry also failed, trying direct URL navigation...');
+        // Try navigating directly to the sub-request page using the SR ID
+        // The PortingAdmin URL format is: #!/sub-request/{portRequestId}/{subRequestId}
+        // We don't have the UUIDs yet, but we can try a different approach:
+        // Navigate to the queue page with a search parameter in the URL hash
+        var directUrl = '#!/queue?statuses=all&search=' + encodeURIComponent(srId);
+        debugLog.push('trying direct URL: ' + directUrl);
+        window.location.hash = directUrl;
+        await new Promise(function(r) { setTimeout(r, 6000); });
+        
+        // Try one more time to find the link
+        var directElements = document.querySelectorAll('*');
+        for (var dei = 0; dei < directElements.length; dei++) {
+          var det = (directElements[dei].textContent || '').trim();
+          if (det.toLowerCase() === srId.toLowerCase() || det.toLowerCase() === srShortId.toLowerCase()) {
+            var walkD = directElements[dei];
+            for (var dwi = 0; dwi < 12; dwi++) {
+              walkD = walkD.parentElement;
+              if (!walkD) break;
+              var directAnchors = walkD.querySelectorAll('a');
+              for (var dai = 0; dai < directAnchors.length; dai++) {
+                if (/sub-request\/[a-f0-9-]{36}/i.test(directAnchors[dai].getAttribute('href') || '')) {
+                  foundLink = directAnchors[dai];
+                  debugLog.push('direct URL nav found link!');
+                  break;
+                }
+              }
+              if (foundLink) break;
+            }
+            if (foundLink) break;
+          }
+        }
+        
+        if (!foundLink) {
+          debugLog.push('all search methods failed');
+          return { error: 'Could not find ' + srId + ' in search results.', _debugLog: debugLog };
+        }
       }
     }
 
