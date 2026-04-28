@@ -259,7 +259,7 @@ function fetchOrderFromPageContext(srId) {
       // ── Split rawText into comment blocks using timestamp delimiters ──
       // DOM commentElements don't respect chronological order; rawText splitting does
       var commentSplitRe = /(?=(?:User|Telnyx Admin)\s+\d{1,2}\/\d{1,2}\/\d{2,4}\s+at\s+\d{1,2}:\d{2}(?:AM|PM)?)/gi;
-      var commentBlocks = rawText.split(commentSplitRe).filter(function(b) { return b.trim().length > 5; });
+      var commentBlocks = rawText.split(commentSplitRe).filter(function(b) { return b.trim().length > 5 && /^(?:User|Telnyx Admin)\s/i.test(b.trim()); });
       debugLog.push('commentBlocks split: ' + commentBlocks.length);
       if (commentBlocks.length > 0) {
         debugLog.push('first block (80): ' + commentBlocks[0].substring(0, 80));
@@ -1462,8 +1462,9 @@ async function createCalendarEvent(eventData) {
     var srId = eventData.srId, country = eventData.country, focDate = eventData.focDate, comment = eventData.comment;
     var durationHours = eventData.durationHours || parseDuration(comment);
 
-    var startDateTime = focDate;
+    var startDateTime = focDate.includes('+') || focDate.includes('Z') ? focDate : focDate + '-05:00';  // CST offset
     var endDateTime = addHoursToFloating(focDate, durationHours);
+    if (!endDateTime.includes('+') && !endDateTime.includes('Z')) endDateTime += '-05:00';  // CST offset
 
     var event = {
       summary: (country || '??') + ' ACT: ' + srId,
