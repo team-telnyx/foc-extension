@@ -275,26 +275,69 @@ function fetchOrderFromPageContext(srId) {
       var directRe3 = new RegExp('\\b' + schedKwPattern + '\\b[\\s\\S]*?\\d{1,2}(?::\\d{2})?\\s*(?:AM|PM)\\b', 'i');
       // commentBlocks are in REVERSE chronological order (newest first at lower indices)
       // So iterate FORWARD (0 → length-1) to find the newest matching block
+      // ALSO validate the extracted date against FOC date — skip matches for old rescheduled dates
       var directSchedMatch = null;
+      var directSchedBlockIdx = -1;
+      // Parse FOC date for comparison
+      var focDateObj = null;
+      if (focDate) {
+        var focDateParts = focDate.match(/(\d{4})-(\d{2})-(\d{2})T/);
+        if (focDateParts) {
+          focDateObj = { year: parseInt(focDateParts[1]), month: parseInt(focDateParts[2]), day: parseInt(focDateParts[3]) };
+        }
+      }
       for (var dbi = 0; dbi < commentBlocks.length; dbi++) {
-        if (directRe1.test(commentBlocks[dbi])) {
-          directSchedMatch = commentBlocks[dbi];
-          debugLog.push('DIRECT SCHED MATCH (re1) block[' + dbi + ']: ' + directSchedMatch.substring(0, 150));
-          break;
+        var matchedRe = null;
+        if (directRe1.test(commentBlocks[dbi])) matchedRe = 're1';
+        else { directRe1.lastIndex = 0; if (directRe2.test(commentBlocks[dbi])) matchedRe = 're2'; }
+        if (!matchedRe) { directRe2.lastIndex = 0; if (directRe3.test(commentBlocks[dbi])) matchedRe = 're3'; }
+        if (!matchedRe) { directRe3.lastIndex = 0; continue; }
+        // Found a match — validate date against FOC date if possible
+        var blockDateMatch = commentBlocks[dbi].match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+        // Handle malformed date like "29/42026"
+        if (!blockDateMatch) {
+          var malformedDate = commentBlocks[dbi].match(/(\d{1,2})\/(\d{1,2})(\d{4})/);
+          if (malformedDate) blockDateMatch = [malformedDate[0], malformedDate[1], malformedDate[2], malformedDate[3]];
         }
-        directRe1.lastIndex = 0;
-        if (!directSchedMatch && directRe2.test(commentBlocks[dbi])) {
-          directSchedMatch = commentBlocks[dbi];
-          debugLog.push('DIRECT SCHED MATCH (re2) block[' + dbi + ']: ' + directSchedMatch.substring(0, 150));
-          break;
+        if (focDateObj && blockDateMatch) {
+          // Check ALL dates in the block — if none are within 3 days of FOC, skip (rescheduled)
+          var allBlockDates = [];
+          var bdRe = /(\d{1,2})\/(\d{1,2})\/(\d{2,4})/g;
+          var bdM;
+          while ((bdM = bdRe.exec(commentBlocks[dbi])) !== null) {
+            allBlockDates.push({ a: parseInt(bdM[1]), b: parseInt(bdM[2]), yr: parseInt(bdM[3]) });
+          }
+          // Also check malformed dates like "29/42026"
+          var bdM2;
+          var bdRe2 = /(\d{1,2})\/(\d{1,2})(\d{4})/g;
+          while ((bdM2 = bdRe2.exec(commentBlocks[dbi])) !== null) {
+            // Avoid double-counting if already matched by the normal regex
+            var isDupe = allBlockDates.some(function(d) { return d.a === parseInt(bdM2[1]) && d.b === parseInt(bdM2[2]); });
+            if (!isDupe) allBlockDates.push({ a: parseInt(bdM2[1]), b: parseInt(bdM2[2]), yr: parseInt(bdM2[3]) });
+          }
+          var anyDateClose = false;
+          for (var bdi2 = 0; bdi2 < allBlockDates.length; bdi2++) {
+            var bd = allBlockDates[bdi2];
+            if (bd.yr < 100) bd.yr += 2000;
+            var bDay2, bMo2;
+            if (bd.a > 12) { bDay2 = bd.a; bMo2 = bd.b; }
+            else if (bd.b > 12) { bMo2 = bd.a; bDay2 = bd.b; }
+            else { bDay2 = bd.b; bMo2 = bd.a; } // DD/MM default for non-US
+            var bdMs = Date.UTC(bd.yr, bMo2 - 1, bDay2);
+            var fMs = Date.UTC(focDateObj.year, focDateObj.month - 1, focDateObj.day);
+            var dd = Math.abs(bdMs - fMs) / 86400000;
+            if (dd <= 3) { anyDateClose = true; break; }
+          }
+          if (!anyDateClose) {
+            debugLog.push('DIRECT SCHED MATCH (' + matchedRe + ') block[' + dbi + '] SKIPPED: no date within 3 days of FOC');
+            directRe1.lastIndex = 0; directRe2.lastIndex = 0; directRe3.lastIndex = 0;
+            continue; // skip this old comment, keep looking
+          }
         }
-        directRe2.lastIndex = 0;
-        if (!directSchedMatch && directRe3.test(commentBlocks[dbi])) {
-          directSchedMatch = commentBlocks[dbi];
-          debugLog.push('DIRECT SCHED MATCH (re3) block[' + dbi + ']: ' + directSchedMatch.substring(0, 150));
-          break;
-        }
-        directRe3.lastIndex = 0;
+        directSchedMatch = commentBlocks[dbi];
+        directSchedBlockIdx = dbi;
+        debugLog.push('DIRECT SCHED MATCH (' + matchedRe + ') block[' + dbi + ']: ' + directSchedMatch.substring(0, 150));
+        break;
       }
       if (directSchedMatch) {
         fullComment = directSchedMatch.trim();
