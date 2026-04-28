@@ -1326,30 +1326,37 @@ function compareLtWithFoc(focDateStr, ltTime, country) {
   
   // Check UTC times from 12h before to 24h after (covers all timezone offsets)
   var countryFmt = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz, hour: 'numeric', minute: 'numeric', hour12: false
+    timeZone: tz, year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', hour12: false
   });
   
   // Step 1: Coarse search (every 30 min) to find the approximate UTC hour
   for (var utcOff = -12; utcOff <= 24; utcOff++) {
     var testMs = utcBase + utcOff * 3600000;
     var formatted = countryFmt.format(new Date(testMs));
-    var fmtMatch = formatted.match(/(\d{1,2}):(\d{2})/);
+    var fmtMatch = formatted.match(/(\d{1,2})\/(\d{1,2})\/(\d{4}),?\s*(\d{1,2}):(\d{2})/);
     if (fmtMatch) {
-      var fmtH = parseInt(fmtMatch[1]);
+      var fmtMo = parseInt(fmtMatch[1]);
+      var fmtDy = parseInt(fmtMatch[2]);
+      var fmtYr = parseInt(fmtMatch[3]);
+      var fmtH = parseInt(fmtMatch[4]);
       if (fmtH === 24) fmtH = 0;
-      // Check if we're within 1 hour of the target
+      // Check if we're within 1 hour of the target AND the date matches
+      var dateMatches = (fmtYr === ltYear && fmtMo === ltMo && fmtDy === ltDy);
       var diff = Math.abs(fmtH - targetHour);
-      if (diff === 0 || diff === 23) {
+      if (dateMatches && (diff === 0 || diff === 23)) {
         // Step 2: Fine search (every 1 min) within this hour
         for (var fineOff = 0; fineOff < 60; fineOff++) {
           var fineMs = testMs + fineOff * 60000;
           var fineFmt = countryFmt.format(new Date(fineMs));
-          var fineMatch = fineFmt.match(/(\d{1,2}):(\d{2})/);
+          var fineMatch = fineFmt.match(/(\d{1,2})\/(\d{1,2})\/(\d{4}),?\s*(\d{1,2}):(\d{2})/);
           if (fineMatch) {
-            var fH = parseInt(fineMatch[1]);
+            var fMo = parseInt(fineMatch[1]);
+            var fDy = parseInt(fineMatch[2]);
+            var fYr = parseInt(fineMatch[3]);
+            var fH = parseInt(fineMatch[4]);
             if (fH === 24) fH = 0;
-            var fM = parseInt(fineMatch[2]);
-            if (fH === targetHour && fM === targetMin) {
+            var fM = parseInt(fineMatch[5]);
+            if (fYr === ltYear && fMo === ltMo && fDy === ltDy && fH === targetHour && fM === targetMin) {
               foundUtc = fineMs;
               break;
             }
