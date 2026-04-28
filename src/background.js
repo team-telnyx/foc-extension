@@ -646,108 +646,82 @@ function fetchOrderFromPageContext(srId) {
     }
 
     // ─── Step 3: Type into the search field ────────────────────────
-    // Strategy: Use native setter + Angular scope + dispatch events
-    // execCommand alone doesn't always trigger Angular's model update
+    // Strategy: Set via Angular's own model controller + force digest via $rootScope
     searchInput.focus();
-    searchInput.select(); // select any existing text
-    
-    // Method 1: Set value via native setter (bypasses React/Angler intercepted setters)
-    var nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-    nativeSetter.call(searchInput, srId);
-    searchInput.dispatchEvent(new Event('input', { bubbles: true }));
-    searchInput.dispatchEvent(new Event('change', { bubbles: true }));
-    searchInput.dispatchEvent(new InputEvent('input', { bubbles: true, data: srId }));
-    debugLog.push('native setter set value="' + searchInput.value + '"');
-    
-    // Method 2: Also try execCommand (simulates actual keyboard input)
-    try {
-      searchInput.focus();
-      searchInput.select();
-      document.execCommand('insertText', false, srId);
-      debugLog.push('execCommand also applied, value="' + searchInput.value + '"');
-    } catch(e) {
-      debugLog.push('execCommand failed: ' + e.message);
-    }
-    
-    // Method 3: Angular ngModelController (proper Angular way to update model)
+    searchInput.select();
+
+    // Method 1: Angular ngModelController.$setViewValue — proper AngularJS API
+    var ngModelSetOk = false;
     try {
       var ngModelCtrl = window.angular && window.angular.element(searchInput).controller('ngModel');
       if (ngModelCtrl) {
         ngModelCtrl.$setViewValue(srId);
         ngModelCtrl.$render();
-        debugLog.push('set via ngModelController.$setViewValue');
+        ngModelSetOk = true;
+        debugLog.push('ngModelController.$setViewValue ok');
+      } else {
+        debugLog.push('no ngModelController found');
       }
     } catch(e) {
-      debugLog.push('ngModelController attempt: ' + e.message);
-    }
-    
-    // Method 4: Angular scope direct model update (fallback)
-    try {
-      var ngScope = window.angular && window.angular.element(searchInput).scope();
-      if (ngScope) {
-        var ngModel = searchInput.getAttribute('ng-model');
-        if (ngModel) {
-          debugLog.push('also trying scope path: ' + ngModel);
-          var parts = ngModel.split('.');
-          var obj = ngScope;
-          for (var pi = 0; pi < parts.length - 1; pi++) {
-            obj = obj[parts[pi]];
-            if (!obj) break;
-          }
-          if (obj) {
-            obj[parts[parts.length - 1]] = srId;
-            try { ngScope.$apply(); } catch(e) {}
-            debugLog.push('set via scope + $apply');
-          } else {
-            debugLog.push('scope path incomplete, obj null at part ' + pi);
-          }
-        }
-      }
-    } catch(e) {
-      debugLog.push('angular scope attempt: ' + e.message);
+      debugLog.push('ngModelController error: ' + e.message);
     }
 
-    debugLog.push('search input value after set: "' + searchInput.value + '"');
-    
-    // Method 5: If value is set but Angular still doesn't see it, simulate typing
-    // This is the nuclear option — actual keyboard events character by character
-    if (searchInput.value === srId) {
-      try {
-        var ngScopeCheck = window.angular && window.angular.element(searchInput).scope();
-        var ngModelName = searchInput.getAttribute('ng-model') || '';
-        var modelValue = null;
-        if (ngScopeCheck && ngModelName) {
-          var checkParts = ngModelName.split('.');
-          var checkObj = ngScopeCheck;
-          for (var cpi = 0; cpi < checkParts.length; cpi++) {
-            checkObj = checkObj ? checkObj[checkParts[cpi]] : undefined;
-          }
-          modelValue = checkObj;
+    // Method 2: Direct scope assignment — walk ng-model path and set on scope
+    try {
+      var ngScope = window.angular && window.angular.element(searchInput).scope();
+      var ngModel = searchInput.getAttribute('ng-model');
+      if (ngScope && ngModel) {
+        var parts = ngModel.split('.');
+        var obj = ngScope;
+        for (var pi = 0; pi < parts.length - 1; pi++) {
+          obj = obj[parts[pi]];
+          if (!obj) { debugLog.push('scope path broke at ' + parts[pi]); break; }
         }
-        debugLog.push('Angular model value check: "' + (modelValue !== undefined ? modelValue : 'UNDEFINED') + '"');
-        if (modelValue !== srId) {
-          // Angular model doesn't have the value — simulate keyboard input
-          debugLog.push('Angular model mismatch, simulating keyboard typing...');
-          searchInput.focus();
-          searchInput.select();
-          // Clear via backspace
-          try { document.execCommand('delete'); } catch(e) {}
-          // Type each character
-          for (var ci = 0; ci < srId.length; ci++) {
-            var ch = srId[ci];
-            searchInput.dispatchEvent(new KeyboardEvent('keydown', { key: ch, bubbles: true }));
-            searchInput.dispatchEvent(new KeyboardEvent('keypress', { key: ch, bubbles: true }));
-            // Use insertText for the character
-            try { document.execCommand('insertText', false, ch); } catch(e) {}
-            searchInput.dispatchEvent(new InputEvent('input', { data: ch, inputType: 'insertText', bubbles: true }));
-            searchInput.dispatchEvent(new KeyboardEvent('keyup', { key: ch, bubbles: true }));
-          }
-          debugLog.push('keyboard typing done, value="' + searchInput.value + '"');
+        if (obj) {
+          obj[parts[parts.length - 1]] = srId;
+          debugLog.push('scope path set: ' + ngModel + ' = ' + srId);
         }
-      } catch(e) {
-        debugLog.push('keyboard sim error: ' + e.message);
       }
+    } catch(e) {
+      debugLog.push('scope path error: ' + e.message);
     }
+
+    // Method 3: Force $rootScope.$apply() to flush all pending digest work
+    try {
+      var inj = window.angular && window.angular.element(document.body).injector();
+      if (inj) {
+        var $rootScope = inj.get('$rootScope');
+        if ($rootScope.$$phase) {
+          // Already in digest — schedule apply for next tick
+          $rootScope.$applyAsync();
+          await new Promise(function(r) { setTimeout(r, 100); });
+          debugLog.push('$applyAsync scheduled (was in $$phase)');
+        } else {
+          $rootScope.$apply();
+          debugLog.push('$rootScope.$apply() done');
+        }
+      } else {
+        debugLog.push('no $injector found');
+      }
+    } catch(e) {
+      debugLog.push('$rootScope apply error: ' + e.message);
+    }
+
+    // Method 4: Native setter + events as final fallback
+    var nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    nativeSetter.call(searchInput, srId);
+    searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+    searchInput.dispatchEvent(new Event('change', { bubbles: true }));
+    debugLog.push('native setter fallback, value="' + searchInput.value + '"');
+
+    // Verify Angular model picked it up
+    try {
+      var ngScopeVerify = window.angular && window.angular.element(searchInput).scope();
+      var ngModelVerify = searchInput.getAttribute('ng-model') || '';
+      var verifyObj = ngScopeVerify;
+      ngModelVerify.split('.').forEach(function(p) { verifyObj = verifyObj ? verifyObj[p] : null; });
+      debugLog.push('Angular model after set: "' + verifyObj + '"');
+    } catch(e) { debugLog.push('verify error: ' + e.message); }
 
     // Small delay to let Angular's digest cycle pick up the new value
     await new Promise(function(r) { setTimeout(r, 2000); });  // Increased from 1s to 2s
