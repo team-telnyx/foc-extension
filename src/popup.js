@@ -22,6 +22,21 @@ const settingsPanel = document.getElementById('settingsPanel');
 const apiKeyInput = document.getElementById('apiKeyInput');
 const emailInput = document.getElementById('emailInput');
 const saveSettingsBtn = document.getElementById('saveSettingsBtn');
+const dateFmtBtn = document.getElementById('dateFmtBtn');
+let dateFmt = 'DD/MM/YYYY'; // default
+
+// ─── Date format toggle ─────────────────────────────────────────────────────
+if (dateFmtBtn) {
+  dateFmtBtn.addEventListener('click', () => {
+    if (dateFmt === 'DD/MM/YYYY') {
+      dateFmt = 'MM/DD/YYYY';
+    } else {
+      dateFmt = 'DD/MM/YYYY';
+    }
+    dateFmtBtn.textContent = dateFmt;
+    chrome.storage.sync.set({ dateFormat: dateFmt });
+  });
+}
 const signInBtn = document.getElementById('signInBtn');
 
 if (settingsLink) {
@@ -31,7 +46,7 @@ if (settingsLink) {
       settingsPanel.classList.toggle('visible');
       // Load current settings when panel opens
       if (settingsPanel.classList.contains('visible')) {
-        chrome.storage.sync.get(['telnyxApiKey', 'userEmail'], (data) => {
+        chrome.storage.sync.get(['telnyxApiKey', 'userEmail', 'dateFormat'], (data) => {
           if (data && data.telnyxApiKey && apiKeyInput) {
             apiKeyInput.value = data.telnyxApiKey;
           }
@@ -43,6 +58,10 @@ if (settingsLink) {
               signInBtn.classList.remove('btn-primary');
               signInBtn.classList.add('btn-success');
             }
+          }
+          if (data && data.dateFormat) {
+            dateFmt = data.dateFormat;
+            if (dateFmtBtn) dateFmtBtn.textContent = dateFmt;
           }
         });
       }
@@ -105,9 +124,13 @@ chrome.storage.session.get('detectedSrId', (data) => {
 });
 
 // ─── Auto-load saved email on popup open ──────────────────────────────────────
-chrome.storage.sync.get('userEmail', (data) => {
+chrome.storage.sync.get(['userEmail', 'dateFormat'], (data) => {
   if (data && data.userEmail && emailInput) {
     emailInput.value = data.userEmail;
+  }
+  if (data && data.dateFormat) {
+    dateFmt = data.dateFormat;
+    if (dateFmtBtn) dateFmtBtn.textContent = dateFmt;
   }
 });
 
@@ -186,8 +209,11 @@ fetchBtn.addEventListener('click', async () => {
 
   showStatus('Looking up ' + srId + '...', 'loading');
 
+  // Get date format preference
+  const { dateFormat } = await chrome.storage.sync.get('dateFormat');
+
   // Tell background to look up the order via API
-  const response = await chrome.runtime.sendMessage({ type: 'LOOKUP_AND_READ', srId: srId });
+  const response = await chrome.runtime.sendMessage({ type: 'LOOKUP_AND_READ', srId: srId, dateFormat: dateFormat || 'DD/MM/YYYY' });
 
   fetchBtn.disabled = false;
 
