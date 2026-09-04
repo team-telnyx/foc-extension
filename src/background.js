@@ -15,6 +15,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
+  if (msg.type === 'GET_CURRENT_USER') {
+    getCurrentUser().then(sendResponse);
+    return true;
+  }
+
   if (msg.type === 'LOOKUP_AND_READ') {
     lookupAndRead(msg.srId).then(sendResponse);
     return true;
@@ -37,6 +42,31 @@ async function handleSignIn() {
     }
     return { success: true, email: null };
   } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+// ─── Get current user (silent — no popup if already signed in) ──────────────────
+
+async function getCurrentUser() {
+  try {
+    // Try silent first (no popup if token exists and is valid)
+    var token = await new Promise((resolve, reject) => {
+      chrome.identity.getAuthToken({ interactive: false }, (t) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+        } else {
+          resolve(t);
+        }
+      });
+    });
+    var email = await detectAndSaveEmail(token);
+    if (email) {
+      return { success: true, email: email };
+    }
+    return { success: false, error: 'No email returned from Google' };
+  } catch (e) {
+    // Not signed in — silent failure, popup stays empty
     return { success: false, error: e.message };
   }
 }
