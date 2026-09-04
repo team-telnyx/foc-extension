@@ -66,13 +66,18 @@ if (saveSettingsBtn) {
     saveSettingsBtn.disabled = true;
     saveSettingsBtn.textContent = 'Signing in...';
 
-    // Save API key locally
-    chrome.storage.sync.set({ telnyxApiKey: key });
+    // Save API key and email locally
+    chrome.storage.sync.set({ telnyxApiKey: key, userEmail: email });
 
     // Trigger Google sign-in
     try {
       const response = await chrome.runtime.sendMessage({ type: 'SIGN_IN' });
       if (response && response.success) {
+        // If Google returned a different email, use that instead
+        if (response.email && emailInput) {
+          emailInput.value = response.email;
+          chrome.storage.sync.set({ userEmail: response.email });
+        }
         saveSettingsBtn.textContent = '✓ Saved & Signed in';
         saveSettingsBtn.classList.remove('btn-primary');
         saveSettingsBtn.classList.add('btn-success');
@@ -108,10 +113,11 @@ chrome.storage.sync.get('userEmail', (data) => {
 
 // ─── Auto-detect email from current Google session ──────────────────────────────
 // If the user is already signed in to Google, fetch their email and fill the field.
-// This keeps the email populated even if they never clicked Save Settings before.
+// This keeps the email populated every time the extension opens.
 chrome.runtime.sendMessage({ type: 'GET_CURRENT_USER' }, (response) => {
   if (response && response.success && response.email && emailInput) {
     emailInput.value = response.email;
+    // Save to storage so it persists
     chrome.storage.sync.set({ userEmail: response.email });
   }
 });
