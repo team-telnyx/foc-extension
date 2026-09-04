@@ -23,18 +23,19 @@ const apiKeyInput = document.getElementById('apiKeyInput');
 const emailInput = document.getElementById('emailInput');
 const saveSettingsBtn = document.getElementById('saveSettingsBtn');
 const signInBtn = document.getElementById('signInBtn');
-const dateFmtBtn = document.getElementById('dateFmtBtn');
-let dateFmt = 'DD/MM/YYYY'; // default
+const dateFmtLink = document.getElementById('dateFmtLink');
+const dateFmtLabel = document.getElementById('dateFmtLabel');
+let dateFmt = 'DD/MM'; // default
 
 // ─── Date format toggle ─────────────────────────────────────────────────────
-if (dateFmtBtn) {
-  dateFmtBtn.addEventListener('click', () => {
-    if (dateFmt === 'DD/MM/YYYY') {
-      dateFmt = 'MM/DD/YYYY';
+if (dateFmtLink) {
+  dateFmtLink.addEventListener('click', () => {
+    if (dateFmt === 'DD/MM') {
+      dateFmt = 'MM/DD';
     } else {
-      dateFmt = 'DD/MM/YYYY';
+      dateFmt = 'DD/MM';
     }
-    dateFmtBtn.textContent = dateFmt;
+    if (dateFmtLabel) dateFmtLabel.textContent = dateFmt;
     chrome.storage.sync.set({ dateFormat: dateFmt });
   });
 }
@@ -61,7 +62,7 @@ if (settingsLink) {
           }
           if (data && data.dateFormat) {
             dateFmt = data.dateFormat;
-            if (dateFmtBtn) dateFmtBtn.textContent = dateFmt;
+            if (dateFmtLabel) dateFmtLabel.textContent = dateFmt;
           }
         });
       }
@@ -130,7 +131,7 @@ chrome.storage.sync.get(['userEmail', 'dateFormat'], (data) => {
   }
   if (data && data.dateFormat) {
     dateFmt = data.dateFormat;
-    if (dateFmtBtn) dateFmtBtn.textContent = dateFmt;
+    if (dateFmtLabel) dateFmtLabel.textContent = dateFmt;
   }
 });
 
@@ -213,7 +214,7 @@ fetchBtn.addEventListener('click', async () => {
   const { dateFormat } = await chrome.storage.sync.get('dateFormat');
 
   // Tell background to look up the order via API
-  const response = await chrome.runtime.sendMessage({ type: 'LOOKUP_AND_READ', srId: srId, dateFormat: dateFormat || 'DD/MM/YYYY' });
+  const response = await chrome.runtime.sendMessage({ type: 'LOOKUP_AND_READ', srId: srId, dateFormat: dateFormat || 'DD/MM' });
 
   fetchBtn.disabled = false;
 
