@@ -320,12 +320,12 @@ const TZ_ABBREV = {
 function parseLocalTimeFromComment(comment, country, dateFormatOverride) {
   if (!comment) return null;
 
-  // Date format override from user settings (DD/MM/YYYY or MM/DD/YYYY)
+  // Date format override from user settings (DD/MM or MM/DD)
   // If set, this takes priority over the country-based default
   var useMonthFirst;
-  if (dateFormatOverride === 'MM/DD/YYYY') {
+  if (dateFormatOverride === 'MM/DD') {
     useMonthFirst = true;
-  } else if (dateFormatOverride === 'DD/MM/YYYY') {
+  } else if (dateFormatOverride === 'DD/MM') {
     useMonthFirst = false;
   } else {
     // Fall back to country-based default
