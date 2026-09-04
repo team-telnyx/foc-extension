@@ -21,7 +21,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg.type === 'LOOKUP_AND_READ') {
-    lookupAndRead(msg.srId).then(sendResponse);
+    lookupAndRead(msg.srId, msg.dateFormat).then(sendResponse);
     return true;
   }
 
@@ -73,7 +73,7 @@ async function getCurrentUser() {
 
 // ─── Main flow ──────────────────────────────────────────────────────────────
 
-async function lookupAndRead(srId) {
+async function lookupAndRead(srId, dateFormat) {
   let debug = [];
 
   // 1. Get API key from chrome.storage.sync
@@ -109,7 +109,7 @@ async function lookupAndRead(srId) {
   }
 
   if (orderResult.country && ltSource) {
-    const ltTime = parseLocalTimeFromComment(ltSource, orderResult.country);
+    const ltTime = parseLocalTimeFromComment(ltSource, orderResult.country, dateFormat);
     if (ltTime) {
       const comparison = compareLtWithFoc(orderResult.focDate, ltTime, orderResult.country);
       orderResult.ltComparison = comparison;
@@ -317,13 +317,21 @@ const TZ_ABBREV = {
 
 // ─── LT → CST Comparison ──────────────────────────────────────────────────────
 
-function parseLocalTimeFromComment(comment, country) {
+function parseLocalTimeFromComment(comment, country, dateFormatOverride) {
   if (!comment) return null;
 
-  // Countries that use MM/DD format (month first) — default assumption
-  // All others default to DD/MM (day first) when ambiguous
-  var MMDD_COUNTRIES = ['US', 'PH', 'CA', 'PR', 'GU', 'MP', 'AS', 'FM', 'MH', 'PW'];
-  var useMonthFirst = country && MMDD_COUNTRIES.indexOf(country) !== -1;
+  // Date format override from user settings (DD/MM/YYYY or MM/DD/YYYY)
+  // If set, this takes priority over the country-based default
+  var useMonthFirst;
+  if (dateFormatOverride === 'MM/DD/YYYY') {
+    useMonthFirst = true;
+  } else if (dateFormatOverride === 'DD/MM/YYYY') {
+    useMonthFirst = false;
+  } else {
+    // Fall back to country-based default
+    var MMDD_COUNTRIES = ['US', 'PH', 'CA', 'PR', 'GU', 'MP', 'AS', 'FM', 'MH', 'PW'];
+    useMonthFirst = country && MMDD_COUNTRIES.indexOf(country) !== -1;
+  }
 
   // Extract the date from the comment text first
   // Patterns: "04/24/2026", "04/24/26", "4/24/2026", "24/4/26", "2026-04-24"
