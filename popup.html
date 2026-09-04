@@ -203,6 +203,48 @@
       color: #4a90d9;
       text-decoration: none;
     }
+
+    .settings-panel {
+      display: none;
+      margin-top: 12px;
+      padding: 12px;
+      background: #1a1f2e;
+      border: 1px solid #2d3748;
+      border-radius: 6px;
+    }
+
+    .settings-panel.visible { display: block; }
+
+    .settings-panel label {
+      margin-bottom: 5px;
+    }
+
+    .settings-panel input {
+      margin-bottom: 8px;
+      font-size: 12px;
+      font-family: monospace;
+    }
+
+    .settings-panel .hint {
+      font-size: 10px;
+      color: #4a5568;
+      margin-top: 4px;
+      line-height: 1.4;
+    }
+
+    .settings-toggle {
+      display: flex;
+      justify-content: center;
+      gap: 12px;
+      margin-top: 12px;
+      font-size: 11px;
+    }
+
+    .settings-toggle a {
+      color: #4a90d9;
+      text-decoration: none;
+      cursor: pointer;
+    }
   </style>
 </head>
 <body>
@@ -248,6 +290,19 @@
 
     <div class="settings-link">
       <a href="#" id="logsLink">📋 Logs</a>
+      <span style="color:#2d3748"> | </span>
+      <a href="#" id="settingsLink">⚙️ Settings</a>
+    </div>
+
+    <div id="settingsPanel" class="settings-panel">
+      <label>Your Google Email</label>
+      <input type="email" id="emailInput" placeholder="your.email@gmail.com" autocomplete="off" />
+      <div class="hint">Enter your Google email and click Save to sign in. You only need to do this once.</div>
+
+      <label style="margin-top:8px">Telnyx API Key</label>
+      <input type="password" id="apiKeyInput" placeholder="KEY019..." autocomplete="off" />
+      <div class="hint">Used for Porting Query API (porting.query.prod.telnyx.io). Stored locally in chrome.storage.sync.</div>
+      <button class="btn btn-primary" id="saveSettingsBtn" style="margin-top:8px">Save Settings</button>
     </div>
 
     <div id="debugInfo" style="font-size:10px; color:#999; padding:4px 0; word-break:break-all; display:none;"></div>

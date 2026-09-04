@@ -1,20 +1,19 @@
 {
   "manifest_version": 3,
   "name": "FOC Calendar Sync",
-  "version": "1.0.35",
+  "version": "1.0.36",
   "description": "Create Google Calendar events for Telnyx porting orders when FOC is confirmed. Looks up SR IDs in PortingAdmin and creates calendar events with FOC date, country, and duration.",
   "permissions": [
     "identity",
     "storage",
     "activeTab",
-    "tabs",
-    "cookies",
-    "scripting"
+    "tabs"
   ],
   "host_permissions": [
     "https://portingadmin.telnyx.com/*",
     "https://api.telnyx.com/*",
     "https://api-internal.telnyx.com/*",
+    "http://porting.query.prod.telnyx.io:4000/*",
     "https://www.googleapis.com/*"
   ],
   "action": {

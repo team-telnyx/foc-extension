@@ -1,6 +1,7 @@
 // Popup logic
+// Manages UI, settings (API key), and message passing to background script
+
 let orderData = null;
-let backgroundTabId = null;
 
 const srInput = document.getElementById('srInput');
 const fetchBtn = document.getElementById('fetchBtn');
@@ -15,17 +16,93 @@ if (versionBadge && chrome.runtime.getManifest) {
   versionBadge.textContent = 'v' + chrome.runtime.getManifest().version;
 }
 
-// ─── On load: check if any PortingAdmin tab is open ─────────────────────────
-chrome.tabs.query({ url: 'https://portingadmin.telnyx.com/*' }, (tabs) => {
-  if (tabs && tabs.length > 0) {
-    detectedBadge.style.display = 'inline';
-    detectedBadge.textContent = 'PortingAdmin open ✓';
-  }
-});
+// ─── Settings panel toggle ──────────────────────────────────────────────────
+const settingsLink = document.getElementById('settingsLink');
+const settingsPanel = document.getElementById('settingsPanel');
+const apiKeyInput = document.getElementById('apiKeyInput');
+const emailInput = document.getElementById('emailInput');
+const saveSettingsBtn = document.getElementById('saveSettingsBtn');
+const signInBtn = document.getElementById('signInBtn');
 
+if (settingsLink) {
+  settingsLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    if (settingsPanel) {
+      settingsPanel.classList.toggle('visible');
+      // Load current settings when panel opens
+      if (settingsPanel.classList.contains('visible')) {
+        chrome.storage.sync.get(['telnyxApiKey', 'userEmail'], (data) => {
+          if (data && data.telnyxApiKey && apiKeyInput) {
+            apiKeyInput.value = data.telnyxApiKey;
+          }
+          if (data && data.userEmail && emailInput) {
+            emailInput.value = data.userEmail;
+            // Show signed-in state if email is already saved
+            if (signInBtn) {
+              signInBtn.textContent = '✓ Signed in as ' + data.userEmail;
+              signInBtn.classList.remove('btn-primary');
+              signInBtn.classList.add('btn-success');
+            }
+          }
+        });
+      }
+    }
+  });
+}
+
+if (saveSettingsBtn) {
+  saveSettingsBtn.addEventListener('click', async () => {
+    const key = apiKeyInput.value.trim();
+    const email = emailInput.value.trim();
+    if (!key) {
+      showStatus('❌ Enter an API key first.', 'error');
+      return;
+    }
+    if (!email) {
+      showStatus('❌ Enter your Google email first.', 'error');
+      return;
+    }
+
+    saveSettingsBtn.disabled = true;
+    saveSettingsBtn.textContent = 'Signing in...';
+
+    // Save API key locally
+    chrome.storage.sync.set({ telnyxApiKey: key });
+
+    // Trigger Google sign-in
+    try {
+      const response = await chrome.runtime.sendMessage({ type: 'SIGN_IN' });
+      if (response && response.success) {
+        saveSettingsBtn.textContent = '✓ Saved & Signed in';
+        saveSettingsBtn.classList.remove('btn-primary');
+        saveSettingsBtn.classList.add('btn-success');
+      } else {
+        saveSettingsBtn.textContent = '❌ ' + (response && response.error ? response.error : 'Sign-in failed');
+      }
+    } catch (e) {
+      saveSettingsBtn.textContent = '❌ Sign-in failed';
+    }
+
+    saveSettingsBtn.disabled = false;
+    setTimeout(() => {
+      saveSettingsBtn.textContent = 'Save Settings';
+      saveSettingsBtn.classList.add('btn-primary');
+      saveSettingsBtn.classList.remove('btn-success');
+    }, 3000);
+  });
+}
+
+// ─── Auto-fill SR ID from content script detection ──────────────────────────
 chrome.storage.session.get('detectedSrId', (data) => {
   if (data && data.detectedSrId) {
     srInput.value = data.detectedSrId;
+  }
+});
+
+// ─── Auto-load saved email on popup open ──────────────────────────────────────
+chrome.storage.sync.get('userEmail', (data) => {
+  if (data && data.userEmail && emailInput) {
+    emailInput.value = data.userEmail;
   }
 });
 
@@ -93,7 +170,7 @@ fetchBtn.addEventListener('click', async () => {
 
   showStatus('Looking up ' + srId + '...', 'loading');
 
-  // Tell background to look up the order
+  // Tell background to look up the order via API
   const response = await chrome.runtime.sendMessage({ type: 'LOOKUP_AND_READ', srId: srId });
 
   fetchBtn.disabled = false;
@@ -108,8 +185,6 @@ fetchBtn.addEventListener('click', async () => {
   }
 
   const order = response.order;
-  // Track background tab for cleanup later
-  if (response.tabId) backgroundTabId = response.tabId;
   if (!order || !order.focDate || isNaN(new Date(order.focDate))) {
     showStatus('❌ No FOC date found on ' + srId + '. FOC must be confirmed first.', 'error');
     return;
@@ -126,13 +201,13 @@ fetchBtn.addEventListener('click', async () => {
     hrs === 1 ? '1 hour (default)' :
     hrs < 1   ? (hrs * 60) + ' minutes' :
                 hrs + ' hours';
-  
+
   // Show order status badge
   var statusEl = document.getElementById('previewStatus');
   var orderStatus = (order.status || 'unknown').toLowerCase().replace(/\s+/g, '-');
   var statusLabel = order.status || 'Unknown';
   statusEl.innerHTML = '<span class="status-badge ' + orderStatus + '">' + statusLabel + '</span>';
-  
+
   // Show D&T → CST comparison if available
   var ltRow = document.getElementById('previewLtRow');
   var ltEl = document.getElementById('previewLt');
@@ -169,15 +244,12 @@ fetchBtn.addEventListener('click', async () => {
   } else {
     ltRow.style.display = 'none';
   }
-  
+
   previewEl.classList.add('visible');
   // Show debug info on success too
   var debugHtml = '';
   if (response.debug) {
     debugHtml = '<br><small style="color:#999">' + response.debug.join(' → ') + '</small>';
-  }
-  if (order._debugLog) {
-    debugHtml += '<br><small style="color:#999">' + order._debugLog.join(' → ') + '</small>';
   }
   if (debugHtml) {
     var debugEl = document.getElementById('debugInfo');
@@ -192,7 +264,7 @@ srInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') fetchBtn.click();
 });
 
-// ─── Create button: create calendar event then close ─────────────────────────
+// ─── Create button: create calendar event ────────────────────────────────────
 createBtn.addEventListener('click', async () => {
   if (!orderData) return;
 
@@ -211,18 +283,10 @@ createBtn.addEventListener('click', async () => {
     return;
   }
 
-  // Close the background tab silently
-  if (backgroundTabId) {
-    chrome.tabs.remove(backgroundTabId).catch(() => {});
-    backgroundTabId = null;
-  }
-
   showStatus('✅ Event created! <a href="' + createResponse.eventLink + '" target="_blank" style="color:#68d391">Open in Calendar →</a>', 'success');
-  // Auto-close disabled for debugging
-  // setTimeout(() => window.close(), 800);
 });
 
-// ─── Logs toggle ────────────────────────────────────────────────────────
+// ─── Logs toggle ─────────────────────────────────────────────────────────────
 document.getElementById('logsLink').addEventListener('click', (e) => {
   e.preventDefault();
   var debugEl = document.getElementById('debugInfo');
