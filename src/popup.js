@@ -106,6 +106,16 @@ chrome.storage.sync.get('userEmail', (data) => {
   }
 });
 
+// ─── Auto-detect email from current Google session ──────────────────────────────
+// If the user is already signed in to Google, fetch their email and fill the field.
+// This keeps the email populated even if they never clicked Save Settings before.
+chrome.runtime.sendMessage({ type: 'GET_CURRENT_USER' }, (response) => {
+  if (response && response.success && response.email && emailInput) {
+    emailInput.value = response.email;
+    chrome.storage.sync.set({ userEmail: response.email });
+  }
+});
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function showStatus(msg, type) {
   statusEl.className = 'status visible ' + type;
