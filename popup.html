@@ -302,6 +302,14 @@
       <label style="margin-top:8px">Telnyx API Key</label>
       <input type="password" id="apiKeyInput" placeholder="KEY019..." autocomplete="off" />
       <div class="hint">Used for Porting Query API (porting.query.prod.telnyx.io). Stored locally in chrome.storage.sync.</div>
+
+      <label style="margin-top:8px">Date Format</label>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button id="dateFmtBtn" style="padding:6px 14px;background:#1a1f2e;border:1px solid #2d3748;border-radius:6px;color:#e2e8f0;font-size:12px;cursor:pointer;font-weight:600;">DD/MM/YYYY</button>
+        <span style="font-size:11px;color:#718096;">Click to toggle how dates are read from comments</span>
+      </div>
+      <div class="hint">DD/MM/YYYY = day first (default). MM/DD/YYYY = month first (US style).</div>
+
       <button class="btn btn-primary" id="saveSettingsBtn" style="margin-top:8px">Save Settings</button>
     </div>
 
