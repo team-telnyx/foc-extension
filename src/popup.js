@@ -160,18 +160,27 @@ function hideStatus() {
 
 function formatDateTime(isoString) {
   if (!isoString) return 'Not found';
-  var floating = isoString.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
-  if (floating) {
-    var yr = floating[1], mo = floating[2], dy = floating[3];
-    var hr = parseInt(floating[4]), mn = floating[5];
-    var ampm = hr >= 12 ? 'PM' : 'AM';
-    var h12 = hr % 12 || 12;
-    var days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-    var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    var d = new Date(yr, parseInt(mo)-1, parseInt(dy));
-    return days[d.getDay()] + ', ' + months[parseInt(mo)-1] + ' ' + parseInt(dy) + ', ' + yr +
-           ', ' + h12 + ':' + mn + ' ' + ampm + ' CT';
+
+  // Check if string has timezone info (Z or +HH:MM) — means it's not floating CT
+  var hasTimezone = /Z$|[+-]\d{2}:?\d{2}$/.test(isoString);
+
+  if (!hasTimezone) {
+    // Floating time (no timezone) — treat as Central Time directly
+    var floating = isoString.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+    if (floating) {
+      var yr = floating[1], mo = floating[2], dy = floating[3];
+      var hr = parseInt(floating[4]), mn = floating[5];
+      var ampm = hr >= 12 ? 'PM' : 'AM';
+      var h12 = hr % 12 || 12;
+      var days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+      var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      var d = new Date(yr, parseInt(mo)-1, parseInt(dy));
+      return days[d.getDay()] + ', ' + months[parseInt(mo)-1] + ' ' + parseInt(dy) + ', ' + yr +
+             ', ' + h12 + ':' + mn + ' ' + ampm + ' CT';
+    }
   }
+
+  // Has timezone info (UTC or offset) — convert to Central Time
   var d2 = new Date(isoString);
   if (isNaN(d2)) return 'Invalid date';
   return d2.toLocaleString('en-US', {
