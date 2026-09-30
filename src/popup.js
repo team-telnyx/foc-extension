@@ -162,26 +162,26 @@ function formatDateTime(isoString) {
   if (!isoString) return 'Not found';
 
   // Check if string has timezone info (Z or +HH:MM) — means it's not floating CT
-  var hasTimezone = /Z$|[+-]\d{2}:?\d{2}$/.test(isoString);
+  const hasTimezone = /Z$|[+-]\d{2}:?\d{2}$/.test(isoString);
 
   if (!hasTimezone) {
     // Floating time (no timezone) — treat as Central Time directly
-    var floating = isoString.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+    const floating = isoString.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
     if (floating) {
-      var yr = floating[1], mo = floating[2], dy = floating[3];
-      var hr = parseInt(floating[4]), mn = floating[5];
-      var ampm = hr >= 12 ? 'PM' : 'AM';
-      var h12 = hr % 12 || 12;
-      var days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-      var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-      var d = new Date(yr, parseInt(mo)-1, parseInt(dy));
+      const yr = floating[1], mo = floating[2], dy = floating[3];
+      const hr = parseInt(floating[4]), mn = floating[5];
+      const ampm = hr >= 12 ? 'PM' : 'AM';
+      const h12 = hr % 12 || 12;
+      const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+      const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      const d = new Date(yr, parseInt(mo)-1, parseInt(dy));
       return days[d.getDay()] + ', ' + months[parseInt(mo)-1] + ' ' + parseInt(dy) + ', ' + yr +
              ', ' + h12 + ':' + mn + ' ' + ampm + ' CT';
     }
   }
 
   // Has timezone info (UTC or offset) — convert to Central Time
-  var d2 = new Date(isoString);
+  const d2 = new Date(isoString);
   if (isNaN(d2)) return 'Invalid date';
   return d2.toLocaleString('en-US', {
     timeZone: 'America/Chicago',
@@ -228,7 +228,7 @@ fetchBtn.addEventListener('click', async () => {
   fetchBtn.disabled = false;
 
   if (!response || response.error) {
-    var debugMsg = '';
+    let debugMsg = '';
     if (response && response.debug) {
       debugMsg = '<br><small style="color:#999">' + response.debug.join(' → ') + '</small>';
     }
@@ -255,17 +255,17 @@ fetchBtn.addEventListener('click', async () => {
                 hrs + ' hours';
 
   // Show order status badge
-  var statusEl = document.getElementById('previewStatus');
-  var orderStatus = (order.status || 'unknown').toLowerCase().replace(/\s+/g, '-');
-  var statusLabel = order.status || 'Unknown';
-  statusEl.innerHTML = '<span class="status-badge ' + orderStatus + '">' + statusLabel + '</span>';
+  const previewStatusEl = document.getElementById('previewStatus');
+  const orderStatus = (order.status || 'unknown').toLowerCase().replace(/\s+/g, '-');
+  const statusLabel = order.status || 'Unknown';
+  previewStatusEl.innerHTML = '<span class="status-badge ' + orderStatus + '">' + statusLabel + '</span>';
 
   // Show D&T → CST comparison if available
-  var ltRow = document.getElementById('previewLtRow');
-  var ltEl = document.getElementById('previewLt');
+  const ltRow = document.getElementById('previewLtRow');
+  const ltEl = document.getElementById('previewLt');
   if (order.ltComparison && order.ltComparison.ltLabel) {
-    var cmp = order.ltComparison;
-    var bgColor, borderColor, textColor, icon, text;
+    const cmp = order.ltComparison;
+    let bgColor, borderColor, textColor, icon, text;
     if (cmp.match === true) {
       // Full match: date + time both match → GREEN
       icon = '✅'; bgColor = 'rgba(104,211,145,0.15)'; borderColor = '#68d391'; textColor = '#68d391';
@@ -299,12 +299,12 @@ fetchBtn.addEventListener('click', async () => {
 
   previewEl.classList.add('visible');
   // Show debug info on success too
-  var debugHtml = '';
+  let debugHtml = '';
   if (response.debug) {
     debugHtml = '<br><small style="color:#999">' + response.debug.join(' → ') + '</small>';
   }
   if (debugHtml) {
-    var debugEl = document.getElementById('debugInfo');
+    const debugEl = document.getElementById('debugInfo');
     if (debugEl) debugEl.innerHTML = debugHtml;
   }
   hideStatus();
@@ -341,7 +341,7 @@ createBtn.addEventListener('click', async () => {
 // ─── Logs toggle ─────────────────────────────────────────────────────────────
 document.getElementById('logsLink').addEventListener('click', (e) => {
   e.preventDefault();
-  var debugEl = document.getElementById('debugInfo');
+  const debugEl = document.getElementById('debugInfo');
   if (debugEl) {
     debugEl.style.display = debugEl.style.display === 'none' ? 'block' : 'none';
   }
