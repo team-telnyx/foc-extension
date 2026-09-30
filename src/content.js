@@ -362,12 +362,17 @@ function broadcastSrId() {
     const uuids = extractUUIDsFromURL();
     const srId = extractSrIdFromPage();
     if (uuids || srId) {
-      chrome.runtime.sendMessage({
-        type: 'SR_DETECTED',
-        srId: srId,
-        uuids,
-        url: window.location.href
-      });
+      try {
+        chrome.runtime.sendMessage({
+          type: 'SR_DETECTED',
+          srId: srId,
+          uuids,
+          url: window.location.href
+        });
+      } catch (e) {
+        // Background script may not be ready (service worker sleeping)
+        console.warn('[FOC Extension] broadcastSrId failed:', e.message);
+      }
     }
   }, 1000);
 }

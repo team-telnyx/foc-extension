@@ -8,6 +8,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'SR_DETECTED') {
     lastDetectedSrId = msg.srId;
     chrome.storage.session.set({ detectedSrId: msg.srId });
+    return true;
   }
 
   if (msg.type === 'SIGN_IN') {
@@ -304,14 +305,15 @@ const TZ_ABBREV = {
   KST:  'Asia/Seoul',         // Korea Standard Time
   TWT:  'Asia/Taipei',        // Taiwan Time
   CST:  'Asia/Shanghai',      // China Standard Time (note: different from US CST)
-  IST_IN: 'Asia/Kolkata',     // India Standard Time
+  // Note: 'IST' is ambiguous (Irish vs Indian). The IST key above maps to Irish time.
+  // India Standard Time does not have a standard TZ abbreviation in comments.
   PHT:  'Asia/Manila',        // Philippine Time
   ICT:  'Asia/Bangkok',       // Indochina Time
   MYT:  'Asia/Kuala_Lumpur',  // Malaysia Time
   // Africa / Middle East
   SAST: 'Africa/Johannesburg', // South Africa Standard Time
   GST:  'Asia/Dubai',         // Gulf Standard Time
-  IST_IL: 'Asia/Jerusalem',   // Israel Standard Time
+  // Israel uses IST but it conflicts with Irish IST; rely on country map (IL) instead.
   AST:  'Asia/Riyadh',        // Arabia Standard Time
 };
 
@@ -319,6 +321,8 @@ const TZ_ABBREV = {
 
 function parseLocalTimeFromComment(comment, country, dateFormatOverride) {
   if (!comment) return null;
+
+  var isoDate = null; // declared at top to avoid scope confusion
 
   // Date format override from user settings (DD/MM or MM/DD)
   // If set, this takes priority over the country-based default
@@ -380,7 +384,7 @@ function parseLocalTimeFromComment(comment, country, dateFormatOverride) {
   }
   // Also try ISO format: "2026-04-24"
   if (!dateMatch) {
-    var isoDate = comment.match(/(\d{4})-(\d{2})-(\d{2})/);
+    isoDate = comment.match(/(\d{4})-(\d{2})-(\d{2})/);
     if (isoDate) {
       commentYear = parseInt(isoDate[1]);
       commentMonth = parseInt(isoDate[2]);
@@ -452,28 +456,8 @@ function parseLocalTimeFromComment(comment, country, dateFormatOverride) {
   return { hour: hour, minute: minute, tzAbbr: 'LT', year: commentYear, month: commentMonth, day: commentDay };
 }
 
-function getTzOffsetDiff(countryTz, year, month, day) {
-  // Returns the offset difference (country - CST) in minutes at the given date
-  // Positive means country is ahead of CST
-  var utcMs = Date.UTC(year, month - 1, day, 12, 0, 0);
-  var countryFmt = new Intl.DateTimeFormat('en-US', {
-    timeZone: countryTz, hour: 'numeric', minute: 'numeric', hour12: false
-  });
-  var cstFmt = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/Chicago', hour: 'numeric', minute: 'numeric', hour12: false
-  });
-  var countryStr = countryFmt.format(new Date(utcMs));
-  var cstStr = cstFmt.format(new Date(utcMs));
-  var cMatch = countryStr.match(/(\d{1,2}):(\d{2})/);
-  var cstMatch = cstStr.match(/(\d{1,2}):(\d{2})/);
-  if (!cMatch || !cstMatch) return null;
-  var countryMin = parseInt(cMatch[1]) * 60 + parseInt(cMatch[2]);
-  var cstMin = parseInt(cstMatch[1]) * 60 + parseInt(cstMatch[2]);
-  return countryMin - cstMin;
-}
-
 function compareLtWithFoc(focDateStr, ltTime, country) {
-  // focDateStr = "2026-04-29T03:00:00" (CST floating)
+  // focDateStr = "2026-08-18T12:00:00Z" (UTC from API)
   // ltTime = { hour: 8, minute: 0, tzAbbr: 'AEST', tzIana: 'Australia/Sydney', year: 2026, month: 4, day: 24 }
   // country = "AU"
   // Returns { match: true/false, dateMatch: bool, ltLabel: "Apr 24, 8:00 AM AEST (AU)", cstLabel: "Apr 23, 5:00 PM CST" }
@@ -677,28 +661,12 @@ async function detectAndSaveEmail(token) {
   return null;
 }
 
-function parseDuration(comment) {
-  if (!comment) return 1;
-  var match = comment.match(/(\d+)\s*(hour|hr|minute|min)/i);
-  if (match) {
-    var num = parseInt(match[1]);
-    var unit = match[2].toLowerCase();
-    if (unit.startsWith('min')) return Math.max(num / 60, 0.5);
-    return num;
-  }
-  return 1;
-}
-
-function addHoursToFloating(dtStr, hours) {
-  var parts = dtStr.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/);
-  if (!parts) return dtStr;
-  // Use proper Date arithmetic to handle multi-day durations
-  var yr = parseInt(parts[1]), mo = parseInt(parts[2]), dy = parseInt(parts[3]);
-  var h = parseInt(parts[4]), m = parseInt(parts[5]);
-  // Add hours and minutes using UTC Date object
-  var dt = new Date(Date.UTC(yr, mo - 1, dy, h, m) + hours * 3600000);
-  var pad = function(n) { return String(n).padStart(2, '0'); };
-  return dt.getUTCFullYear() + '-' + pad(dt.getUTCMonth() + 1) + '-' + pad(dt.getUTCDate()) + 'T' + pad(dt.getUTCHours()) + ':' + pad(dt.getUTCMinutes()) + ':00';
+function addHoursToUTC(dtStr, hours) {
+  // Parse ISO datetime and add hours using Date arithmetic
+  var dt = new Date(dtStr);
+  if (isNaN(dt)) return dtStr;
+  var result = new Date(dt.getTime() + hours * 3600000);
+  return result.toISOString().replace(/\.\d{3}Z$/, 'Z');
 }
 
 async function createCalendarEvent(eventData) {
@@ -709,11 +677,11 @@ async function createCalendarEvent(eventData) {
     await detectAndSaveEmail(token);
 
     var srId = eventData.srId, country = eventData.country, focDate = eventData.focDate, comment = eventData.comment;
-    var durationHours = eventData.durationHours || parseDuration(comment);
+    var durationHours = eventData.durationHours || 1;
 
-    var startDateTime = focDate.includes('+') || focDate.includes('Z') ? focDate : focDate + '-05:00';  // CST offset
-    var endDateTime = addHoursToFloating(focDate, durationHours);
-    if (!endDateTime.includes('+') && !endDateTime.includes('Z')) endDateTime += '-05:00';  // CST offset
+    // Use the FOC date as-is if it has timezone info; otherwise assume UTC
+    var startDateTime = focDate.includes('+') || focDate.includes('Z') ? focDate : focDate + 'Z';
+    var endDateTime = addHoursToUTC(startDateTime, durationHours);
 
     var event = {
       summary: (country || '??') + ' ACT: ' + srId,
