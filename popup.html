@@ -245,6 +245,41 @@
       text-decoration: none;
       cursor: pointer;
     }
+
+    .auto-port-status {
+      margin-top: 8px;
+      padding: 8px 12px;
+      background: #1a1f2e;
+      border: 1px solid #2d3748;
+      border-radius: 6px;
+      font-size: 11px;
+    }
+
+    .auto-port-status.pending {
+      border-color: #4a90d9;
+      background: rgba(74, 144, 217, 0.08);
+    }
+
+    .auto-port-status.success {
+      border-color: #68d391;
+      background: rgba(104, 211, 145, 0.08);
+    }
+
+    .auto-port-status.error {
+      border-color: #fc8181;
+      background: rgba(252, 129, 129, 0.08);
+    }
+
+    .auto-port-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: #a0aec0;
+    }
+
+    .auto-port-row strong {
+      color: #e2e8f0;
+    }
   </style>
 </head>
 <body>
@@ -286,7 +321,17 @@
 
     <button class="btn btn-primary" id="fetchBtn">🔍 Fetch Order Details</button>
     <div style="height:8px"></div>
-    <button class="btn btn-success" id="createBtn" style="display:none">📅 Create Calendar Event</button>
+    <button class="btn btn-success" id="createBtn" style="display:none">📅 Create Calendar Event + Auto-Port</button>
+    <div id="existingJobNote" style="display:none;margin-top:8px;padding:8px 10px;background:#1e3a5f;color:#63b3ed;border:1px solid #2b6cb0;border-radius:6px;font-size:11px;line-height:1.5"></div>
+    <div style="height:8px"></div>
+    <button class="btn btn-secondary" id="cancelBtn" style="display:none;background:#4a5568;color:#e2e8f0">✖️ Cancel Scheduled Auto-Port</button>
+
+    <div id="autoPortStatus" class="auto-port-status" style="display:none">
+      <div class="auto-port-row">
+        <span class="auto-port-icon">⚡</span>
+        <span id="autoPortText"></span>
+      </div>
+    </div>
 
     <div class="settings-link">
       <a href="#" id="dateFmtLink"><span id="dateFmtLabel">DD/MM</span></a>

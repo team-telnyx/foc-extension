@@ -6,6 +6,9 @@ let orderData = null;
 const srInput = document.getElementById('srInput');
 const fetchBtn = document.getElementById('fetchBtn');
 const createBtn = document.getElementById('createBtn');
+const cancelBtn = document.getElementById('cancelBtn');
+const existingJobNote = document.getElementById('existingJobNote');
+let existingJob = null; // set when fetch finds an already-scheduled job
 const statusEl = document.getElementById('status');
 const previewEl = document.getElementById('preview');
 const detectedBadge = document.getElementById('detectedBadge');
@@ -207,8 +210,11 @@ function parseDuration(comment) {
 fetchBtn.addEventListener('click', async () => {
   fetchBtn.disabled = true;
   createBtn.style.display = 'none';
+  cancelBtn.style.display = 'none';
+  existingJobNote.style.display = 'none';
   previewEl.classList.remove('visible');
   orderData = null;
+  existingJob = null;
 
   const srId = srInput.value.trim();
   if (!srId) {
@@ -297,6 +303,38 @@ fetchBtn.addEventListener('click', async () => {
     ltRow.style.display = 'none';
   }
 
+  // Detect existing job and swap button label + show cancel option
+  existingJob = response.existingJob || null;
+  var focDateChanged = false;
+  if (existingJob && !existingJob.executed) {
+    focDateChanged = existingJob.focDate !== order.focDate;
+    if (focDateChanged) {
+      createBtn.textContent = '🔁 Reschedule Event + Auto-Port';
+      createBtn.className = 'btn btn-warning';
+      createBtn.style.background = '#ed8936';
+      createBtn.style.color = '#fff';
+      existingJobNote.innerHTML = '<strong>⚠️ FOC date changed</strong> from <code>' + existingJob.focDate + '</code> to <code>' + order.focDate + '</code>. The existing calendar event and auto-port alarm will be cancelled and replaced.';
+      existingJobNote.style.display = 'block';
+    } else {
+      createBtn.textContent = '📅 Re-create Event + Auto-Port';
+      existingJobNote.innerHTML = '<strong>ℹ️ An event + auto-port already exist</strong> for this SR. Click to re-create (the old event will be replaced).';
+      existingJobNote.style.display = 'block';
+    }
+    cancelBtn.style.display = 'block';
+  } else if (existingJob && existingJob.executed) {
+    createBtn.textContent = '📅 Re-create Calendar Event';
+    existingJobNote.innerHTML = '<strong>ℹ️ Auto-port already ran</strong> for this SR. The old calendar event may still be active — click to create a fresh one.';
+    existingJobNote.style.display = 'block';
+    // Show cleanup button so user can bulk-delete leftover calendar events
+    cancelBtn.style.display = 'block';
+    cancelBtn.textContent = '🗑️ Clean Up Calendar Events';
+  } else {
+    createBtn.textContent = '📅 Create Calendar Event + Auto-Port';
+    createBtn.className = 'btn btn-success';
+    createBtn.style.background = '';
+    createBtn.style.color = '';
+  }
+
   previewEl.classList.add('visible');
   // Show debug info on success too
   var debugHtml = '';
@@ -321,21 +359,163 @@ createBtn.addEventListener('click', async () => {
   if (!orderData) return;
 
   createBtn.disabled = true;
-  showStatus('Creating calendar event...', 'loading');
+  showStatus('Creating calendar event + scheduling auto-port...', 'loading');
 
   const durationHours = parseDuration(orderData.comment);
+  const eventData = Object.assign({}, orderData, { durationHours: durationHours });
+
+  // Reschedule path: cancel old event + alarm, create new ones
+  if (existingJob && !existingJob.executed) {
+    showStatus('Rescheduling event + auto-port...', 'loading');
+    const rescheduleResponse = await chrome.runtime.sendMessage({
+      type: 'RESCHEDULE_AUTO_PORT',
+      orderData: eventData
+    });
+    if (!rescheduleResponse || rescheduleResponse.error) {
+      createBtn.disabled = false;
+      showStatus('❌ Reschedule: ' + (rescheduleResponse ? rescheduleResponse.error : 'No response'), 'error');
+      return;
+    }
+    let statusHtml = '✅ Rescheduled! <a href="' + rescheduleResponse.newEventLink + '" target="_blank" style="color:#68d391">Open new event →</a>';
+    if (rescheduleResponse.oldEventDeleted) {
+      const n = rescheduleResponse.oldEventDeletedCount || 1;
+      statusHtml += '<br>🗑️ Cleaned up ' + n + ' old event' + (n > 1 ? 's' : '') + ' from calendar.';
+    } else if (rescheduleResponse.oldEventError) {
+      statusHtml += '<br>⚠️ Old event: ' + rescheduleResponse.oldEventError;
+    }
+    if (rescheduleResponse.scheduled) {
+      statusHtml += '<br>⚡ New auto-port scheduled.';
+    } else if (rescheduleResponse.executed) {
+      statusHtml += '<br>⚡ Auto-port executed (FOC was due).';
+    }
+    showStatus(statusHtml, 'success');
+    // Refresh local state
+    existingJob = null;
+    cancelBtn.style.display = 'none';
+    existingJobNote.style.display = 'none';
+    createBtn.textContent = '📅 Create Calendar Event + Auto-Port';
+    createBtn.className = 'btn btn-success';
+    createBtn.style.background = '';
+    createBtn.style.color = '';
+    return;
+  }
+
+  // 1. Create calendar event
   const createResponse = await chrome.runtime.sendMessage({
     type: 'CREATE_EVENT',
-    eventData: Object.assign({}, orderData, { durationHours: durationHours })
+    eventData: eventData
   });
 
   if (!createResponse || createResponse.error) {
     createBtn.disabled = false;
-    showStatus('❌ ' + (createResponse ? createResponse.error : 'No response'), 'error');
+    showStatus('❌ Calendar: ' + (createResponse ? createResponse.error : 'No response'), 'error');
     return;
   }
 
-  showStatus('✅ Event created! <a href="' + createResponse.eventLink + '" target="_blank" style="color:#68d391">Open in Calendar →</a>', 'success');
+  // 2. Schedule auto-port at FOC time
+  const autoPortResponse = await chrome.runtime.sendMessage({
+    type: 'SCHEDULE_AUTO_PORT',
+    orderData: Object.assign({}, eventData, {
+      eventId: createResponse.eventId,
+      eventLink: createResponse.eventLink
+    })
+  });
+
+  let statusHtml = '✅ Event created! <a href="' + createResponse.eventLink + '" target="_blank" style="color:#68d391">Open in Calendar →</a>';
+
+  // Show auto-port status
+  const apStatusEl = document.getElementById('autoPortStatus');
+  const apTextEl = document.getElementById('autoPortText');
+
+  if (autoPortResponse && autoPortResponse.success) {
+    if (autoPortResponse.executed) {
+      // FOC was in the past — executed immediately
+      const r = autoPortResponse.result || {};
+      const comp = r.completionSuccess ? '✅' : '❌';
+      const comment = r.commentSuccess ? '✅' : '❌';
+      apStatusEl.className = 'auto-port-status ' + (r.completionSuccess && r.commentSuccess ? 'success' : 'error');
+      apTextEl.innerHTML = '<strong>Auto-Port executed:</strong> Completion ' + comp + ' | Comment ' + comment;
+      if (r.log && r.log.length) {
+        apTextEl.innerHTML += '<br><small style="color:#a0aec0;font-size:10px;display:block;margin-top:4px;line-height:1.4">' + r.log.join(' → ') + '</small>';
+      }
+      apStatusEl.style.display = 'block';
+      statusHtml += '<br>⚡ Auto-port executed immediately (FOC was due).';
+    } else {
+      // Scheduled for future
+      const mins = autoPortResponse.delayMinutes;
+      const timeDesc = mins < 60 ? mins + ' min' : Math.round(mins / 60) + 'h ' + (mins % 60) + 'min';
+      apStatusEl.className = 'auto-port-status pending';
+      apTextEl.innerHTML = '<strong>Auto-Port scheduled:</strong> fires at FOC time (in ' + timeDesc + ')';
+      apStatusEl.style.display = 'block';
+      statusHtml += '<br>⚡ Auto-port scheduled for FOC time.';
+    }
+  } else {
+    apStatusEl.className = 'auto-port-status error';
+    apTextEl.textContent = '⚠️ Auto-port: ' + (autoPortResponse ? autoPortResponse.error : 'failed');
+    apStatusEl.style.display = 'block';
+    statusHtml += '<br>⚠️ Auto-port scheduling failed.';
+  }
+
+  showStatus(statusHtml, 'success');
+});
+
+// ─── Cancel scheduled auto-port (full cancel: alarm + event) ─────────────────
+cancelBtn.addEventListener('click', async () => {
+  if (!orderData) return;
+  if (!confirm('Cancel the scheduled auto-port for ' + orderData.srId + '?\n\nThis will:\n• Delete the Google Calendar event(s)\n• Cancel the auto-port alarm (if scheduled)')) return;
+  cancelBtn.disabled = true;
+  showStatus('Cancelling auto-port + deleting calendar event...', 'loading');
+  const response = await chrome.runtime.sendMessage({
+    type: 'CANCEL_AUTO_PORT_FULL',
+    srId: orderData.srId
+  });
+  cancelBtn.disabled = false;
+  if (response && response.success) {
+    let msg = '✅ Auto-port cancelled';
+    if (response.eventDeleted) {
+      const n = response.eventDeletedCount || 1;
+      msg += ' + ' + n + ' calendar event' + (n > 1 ? 's' : '') + ' deleted';
+    }
+    else if (response.eventError) msg += ' (event delete failed: ' + response.eventError + ')';
+    showStatus(msg, 'success');
+    existingJob = null;
+    cancelBtn.style.display = 'none';
+    existingJobNote.style.display = 'none';
+    createBtn.textContent = '📅 Create Calendar Event + Auto-Port';
+    createBtn.className = 'btn btn-success';
+    createBtn.style.background = '';
+    createBtn.style.color = '';
+  } else {
+    showStatus('❌ ' + (response && response.error ? response.error : 'Cancel failed'), 'error');
+  }
+});
+
+// ─── Check auto-port status on popup open ──────────────────────────────────────
+// If there's a detected SR ID, check if auto-port is already scheduled
+chrome.storage.session.get('detectedSrId', async (data) => {
+  if (data && data.detectedSrId) {
+    const response = await chrome.runtime.sendMessage({
+      type: 'CHECK_AUTO_PORT_STATUS',
+      srId: data.detectedSrId
+    });
+    if (response && response.found) {
+      const apStatusEl = document.getElementById('autoPortStatus');
+      const apTextEl = document.getElementById('autoPortText');
+      if (response.executed) {
+        const comp = response.completionSuccess ? '✅' : '❌';
+        const comment = response.commentSuccess ? '✅' : '❌';
+        apStatusEl.className = 'auto-port-status ' + (response.completionSuccess && response.commentSuccess ? 'success' : 'error');
+        apTextEl.innerHTML = '<strong>Auto-Port already executed:</strong> Completion ' + comp + ' | Comment ' + comment;
+        if (response.log && response.log.length) {
+          apTextEl.innerHTML += '<br><small style="color:#a0aec0">' + response.log.join(' → ') + '</small>';
+        }
+      } else {
+        apStatusEl.className = 'auto-port-status pending';
+        apTextEl.innerHTML = '<strong>Auto-Port scheduled:</strong> FOC ' + (response.focDate || 'N/A');
+      }
+      apStatusEl.style.display = 'block';
+    }
+  }
 });
 
 // ─── Logs toggle ─────────────────────────────────────────────────────────────
