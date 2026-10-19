@@ -6,6 +6,7 @@ let orderData = null;
 const srInput = document.getElementById('srInput');
 const fetchBtn = document.getElementById('fetchBtn');
 const createBtn = document.getElementById('createBtn');
+const createOnlyBtn = document.getElementById('createOnlyBtn');
 const cancelBtn = document.getElementById('cancelBtn');
 const existingJobNote = document.getElementById('existingJobNote');
 let existingJob = null; // set when fetch finds an already-scheduled job
@@ -210,6 +211,7 @@ function parseDuration(comment) {
 fetchBtn.addEventListener('click', async () => {
   fetchBtn.disabled = true;
   createBtn.style.display = 'none';
+  createOnlyBtn.style.display = 'none';
   cancelBtn.style.display = 'none';
   existingJobNote.style.display = 'none';
   previewEl.classList.remove('visible');
@@ -306,7 +308,19 @@ fetchBtn.addEventListener('click', async () => {
   // Detect existing job and swap button label + show cancel option
   existingJob = response.existingJob || null;
   var focDateChanged = false;
-  if (existingJob && !existingJob.executed) {
+  if (existingJob && existingJob.eventOnly) {
+    // Calendar-only job exists (old-function event, no auto-port)
+    createBtn.textContent = '📅 Create Calendar Event + Auto-Port';
+    createBtn.className = 'btn btn-success';
+    createBtn.style.background = '';
+    createBtn.style.color = '';
+    existingJobNote.innerHTML = '<strong>ℹ️ A calendar-only event exists</strong> for this SR (no auto-port). "Create + Auto-Port" will replace it and also schedule auto-port.';
+    existingJobNote.style.display = 'block';
+    createOnlyBtn.textContent = '🔁 Re-create Event Only';
+    createOnlyBtn.style.display = 'block';
+    cancelBtn.style.display = 'block';
+    cancelBtn.textContent = '✖️ Remove Calendar Event';
+  } else if (existingJob && !existingJob.executed) {
     focDateChanged = existingJob.focDate !== order.focDate;
     if (focDateChanged) {
       createBtn.textContent = '🔁 Reschedule Event + Auto-Port';
@@ -321,6 +335,7 @@ fetchBtn.addEventListener('click', async () => {
       existingJobNote.style.display = 'block';
     }
     cancelBtn.style.display = 'block';
+    createOnlyBtn.style.display = 'none';
   } else if (existingJob && existingJob.executed) {
     createBtn.textContent = '📅 Re-create Calendar Event';
     existingJobNote.innerHTML = '<strong>ℹ️ Auto-port already ran</strong> for this SR. The old calendar event may still be active — click to create a fresh one.';
@@ -328,11 +343,15 @@ fetchBtn.addEventListener('click', async () => {
     // Show cleanup button so user can bulk-delete leftover calendar events
     cancelBtn.style.display = 'block';
     cancelBtn.textContent = '🗑️ Clean Up Calendar Events';
+    createOnlyBtn.textContent = '📅 Create Event Only (No Auto-Port)';
+    createOnlyBtn.style.display = 'block';
   } else {
     createBtn.textContent = '📅 Create Calendar Event + Auto-Port';
     createBtn.className = 'btn btn-success';
     createBtn.style.background = '';
     createBtn.style.color = '';
+    createOnlyBtn.textContent = '📅 Create Event Only (No Auto-Port)';
+    createOnlyBtn.style.display = 'block';
   }
 
   previewEl.classList.add('visible');
@@ -393,6 +412,7 @@ createBtn.addEventListener('click', async () => {
     existingJob = null;
     cancelBtn.style.display = 'none';
     existingJobNote.style.display = 'none';
+    createOnlyBtn.style.display = 'none';
     createBtn.textContent = '📅 Create Calendar Event + Auto-Port';
     createBtn.className = 'btn btn-success';
     createBtn.style.background = '';
@@ -457,14 +477,54 @@ createBtn.addEventListener('click', async () => {
   }
 
   showStatus(statusHtml, 'success');
+  createOnlyBtn.style.display = 'none';
+});
+
+// ─── Event-only button: old function (calendar event, no auto-port) ─────────
+createOnlyBtn.addEventListener('click', async () => {
+  if (!orderData) return;
+  const replace = !!(existingJob && existingJob.eventOnly);
+  createOnlyBtn.disabled = true;
+  showStatus(replace ? 'Re-creating calendar event...' : 'Creating calendar event...', 'loading');
+
+  const durationHours = parseDuration(orderData.comment);
+  const eventData = Object.assign({}, orderData, { durationHours: durationHours });
+
+  const response = await chrome.runtime.sendMessage({
+    type: 'CREATE_EVENT_ONLY',
+    orderData: eventData,
+    replaceExisting: replace
+  });
+  createOnlyBtn.disabled = false;
+
+  if (!response || response.error) {
+    showStatus('❌ ' + (response ? response.error : 'No response'), 'error');
+    return;
+  }
+
+  let msg = '✅ Event created! <a href="' + response.eventLink + '" target="_blank" style="color:#68d391">Open in Calendar →</a>';
+  if (response.removedCount) msg += '<br>🗑️ Removed ' + response.removedCount + ' old event' + (response.removedCount > 1 ? 's' : '') + '.';
+  if (response.removedError) msg += '<br>⚠️ Old event cleanup: ' + response.removedError;
+  showStatus(msg, 'success');
+
+  existingJob = { srId: orderData.srId, focDate: orderData.focDate, executed: false, eventOnly: true };
+  createOnlyBtn.textContent = '🔁 Re-create Event Only';
+  cancelBtn.style.display = 'block';
+  cancelBtn.textContent = '✖️ Remove Calendar Event';
+  existingJobNote.innerHTML = '<strong>ℹ️ Calendar-only event exists</strong> for this SR (no auto-port scheduled).';
+  existingJobNote.style.display = 'block';
 });
 
 // ─── Cancel scheduled auto-port (full cancel: alarm + event) ─────────────────
 cancelBtn.addEventListener('click', async () => {
   if (!orderData) return;
-  if (!confirm('Cancel the scheduled auto-port for ' + orderData.srId + '?\n\nThis will:\n• Delete the Google Calendar event(s)\n• Cancel the auto-port alarm (if scheduled)')) return;
+  var isEventOnly = existingJob && existingJob.eventOnly;
+  var confirmMsg = isEventOnly
+    ? 'Remove the calendar-only event for ' + orderData.srId + '?\n\nThis will delete the Google Calendar event(s).'
+    : 'Cancel the scheduled auto-port for ' + orderData.srId + '?\n\nThis will:\n• Delete the Google Calendar event(s)\n• Cancel the auto-port alarm (if scheduled)';
+  if (!confirm(confirmMsg)) return;
   cancelBtn.disabled = true;
-  showStatus('Cancelling auto-port + deleting calendar event...', 'loading');
+  showStatus(isEventOnly ? 'Removing calendar event...' : 'Cancelling auto-port + deleting calendar event...', 'loading');
   const response = await chrome.runtime.sendMessage({
     type: 'CANCEL_AUTO_PORT_FULL',
     srId: orderData.srId
@@ -481,6 +541,8 @@ cancelBtn.addEventListener('click', async () => {
     existingJob = null;
     cancelBtn.style.display = 'none';
     existingJobNote.style.display = 'none';
+    createOnlyBtn.textContent = '📅 Create Event Only (No Auto-Port)';
+    createOnlyBtn.style.display = 'block';
     createBtn.textContent = '📅 Create Calendar Event + Auto-Port';
     createBtn.className = 'btn btn-success';
     createBtn.style.background = '';
@@ -501,7 +563,10 @@ chrome.storage.session.get('detectedSrId', async (data) => {
     if (response && response.found) {
       const apStatusEl = document.getElementById('autoPortStatus');
       const apTextEl = document.getElementById('autoPortText');
-      if (response.executed) {
+      if (response.eventOnly) {
+        apStatusEl.className = 'auto-port-status pending';
+        apTextEl.innerHTML = '<strong>Calendar-only event exists:</strong> FOC ' + (response.focDate || 'N/A') + ' (no auto-port scheduled)';
+      } else if (response.executed) {
         const comp = response.completionSuccess ? '✅' : '❌';
         const comment = response.commentSuccess ? '✅' : '❌';
         apStatusEl.className = 'auto-port-status ' + (response.completionSuccess && response.commentSuccess ? 'success' : 'error');

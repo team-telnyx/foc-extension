@@ -44,6 +44,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     createCalendarEvent(msg.eventData).then(sendResponse);
     return true;
   }
+  if (msg.type === 'CREATE_EVENT_ONLY') {
+    createEventOnly(msg.orderData, msg.replaceExisting).then(sendResponse);
+    return true;
+  }
   if (msg.type === 'SCHEDULE_AUTO_PORT') {
     scheduleAutoPort(msg.orderData, msg.eventId, msg.eventLink).then(sendResponse);
     return true;
@@ -791,6 +795,7 @@ async function checkAutoPortStatus(srId) {
       focDate: job.focDate,
       scheduledAt: job.scheduledAt,
       executed: job.executed || false,
+      eventOnly: job.eventOnly || false,
       executedAt: job.executedAt || null,
       completionSuccess: job.completionSuccess || null,
       commentSuccess: job.commentSuccess || null,
@@ -799,6 +804,40 @@ async function checkAutoPortStatus(srId) {
     };
   } catch (e) {
     return { error: e.message };
+  }
+}
+
+// Old-function flow: create calendar event only (no auto-port alarm).
+// Stores an eventOnly job so cancel/re-create UX still covers it.
+async function createEventOnly(orderData, replaceExisting) {
+  try {
+    const srId = orderData.srId;
+    if (!srId) return { error: 'No srId' };
+    let removedCount = 0;
+    let removedError = null;
+    if (replaceExisting) {
+      const cleanup = await cancelAutoPortFull(srId);
+      removedCount = cleanup.eventDeletedCount || 0;
+      removedError = cleanup.eventError || null;
+    }
+    const eventResult = await createCalendarEvent(orderData);
+    if (eventResult.error) return { error: eventResult.error, removedCount, removedError };
+    const { autoPortJobs } = await chrome.storage.local.get('autoPortJobs');
+    const jobs = autoPortJobs || {};
+    jobs[srId] = {
+      srId: srId,
+      focDate: orderData.focDate,
+      scheduledAt: new Date().toISOString(),
+      executed: false,
+      eventOnly: true,
+      eventId: eventResult.eventId,
+      eventLink: eventResult.eventLink,
+      orderData: orderData
+    };
+    await chrome.storage.local.set({ autoPortJobs: jobs });
+    return { success: true, eventId: eventResult.eventId, eventLink: eventResult.eventLink, removedCount, removedError };
+  } catch (e) {
+    return { error: 'Event-only create failed: ' + e.message };
   }
 }
 
