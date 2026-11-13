@@ -352,6 +352,12 @@
       <input type="password" id="apiKeyInput" placeholder="KEY019..." autocomplete="off" />
       <div class="hint">Used for Porting Query API (porting.query.prod.telnyx.io). Stored locally in chrome.storage.sync.</div>
 
+      <label style="margin-top:8px">Slack Bot Token (phenbot, xoxb-…)</label>
+      <input type="password" id="slackTokenInput" placeholder="xoxb-..." autocomplete="off" />
+      <label style="margin-top:8px">Slack User ID for DM (U…)</label>
+      <input type="text" id="slackUserInput" placeholder="U0XXXXXXXXX" autocomplete="off" />
+      <div class="hint">Optional. Auto-port failure/success alerts are DM'd from phenbot. Stored locally in chrome.storage.sync.</div>
+
       <div class="hint" style="margin-top:8px">Date format: click <strong>DD/MM</strong> or <strong>MM/DD</strong> below to toggle</div>
 
       <button class="btn btn-primary" id="saveSettingsBtn" style="margin-top:8px">Save Settings</button>

@@ -25,6 +25,8 @@ const settingsLink = document.getElementById('settingsLink');
 const settingsPanel = document.getElementById('settingsPanel');
 const apiKeyInput = document.getElementById('apiKeyInput');
 const emailInput = document.getElementById('emailInput');
+const slackTokenInput = document.getElementById('slackTokenInput');
+const slackUserInput = document.getElementById('slackUserInput');
 const saveSettingsBtn = document.getElementById('saveSettingsBtn');
 const signInBtn = document.getElementById('signInBtn');
 const dateFmtLink = document.getElementById('dateFmtLink');
@@ -51,9 +53,15 @@ if (settingsLink) {
       settingsPanel.classList.toggle('visible');
       // Load current settings when panel opens
       if (settingsPanel.classList.contains('visible')) {
-        chrome.storage.sync.get(['telnyxApiKey', 'userEmail', 'dateFormat'], (data) => {
+        chrome.storage.sync.get(['telnyxApiKey', 'userEmail', 'dateFormat', 'slackBotToken', 'slackUserId'], (data) => {
           if (data && data.telnyxApiKey && apiKeyInput) {
             apiKeyInput.value = data.telnyxApiKey;
+          }
+          if (data && data.slackBotToken && slackTokenInput) {
+            slackTokenInput.value = data.slackBotToken;
+          }
+          if (data && data.slackUserId && slackUserInput) {
+            slackUserInput.value = data.slackUserId;
           }
           if (data && data.userEmail && emailInput) {
             emailInput.value = data.userEmail;
@@ -90,8 +98,14 @@ if (saveSettingsBtn) {
     saveSettingsBtn.disabled = true;
     saveSettingsBtn.textContent = 'Signing in...';
 
-    // Save API key and email locally
-    chrome.storage.sync.set({ telnyxApiKey: key, userEmail: email });
+    // Save API key, email, and optional Slack alert config locally
+    const slackToken = slackTokenInput ? slackTokenInput.value.trim() : '';
+    const slackUser = slackUserInput ? slackUserInput.value.trim() : '';
+    const updates = { telnyxApiKey: key, userEmail: email };
+    if (slackToken) updates.slackBotToken = slackToken;
+    if (slackUser) updates.slackUserId = slackUser;
+    chrome.storage.sync.set(updates);
+    if (slackToken) chrome.storage.sync.remove('slackDmChannel');
 
     // Trigger Google sign-in
     try {
@@ -455,6 +469,12 @@ createBtn.addEventListener('click', async () => {
       const comment = r.commentSuccess ? '✅' : '❌';
       apStatusEl.className = 'auto-port-status ' + (r.completionSuccess && r.commentSuccess ? 'success' : 'error');
       apTextEl.innerHTML = '<strong>Auto-Port executed:</strong> Completion ' + comp + ' | Comment ' + comment;
+      if (r.retryScheduled) {
+        apTextEl.innerHTML += '<br><small style="color:#63b3ed">↻ Failed step will retry every 5 min until it succeeds</small>';
+      }
+      if (r.alreadyPorted) {
+        apTextEl.innerHTML += '<br><small style="color:#a0aec0">(order already ported — trigger skipped)</small>';
+      }
       if (r.log && r.log.length) {
         apTextEl.innerHTML += '<br><small style="color:#a0aec0;font-size:10px;display:block;margin-top:4px;line-height:1.4">' + r.log.join(' → ') + '</small>';
       }
@@ -571,6 +591,11 @@ chrome.storage.session.get('detectedSrId', async (data) => {
         const comment = response.commentSuccess ? '✅' : '❌';
         apStatusEl.className = 'auto-port-status ' + (response.completionSuccess && response.commentSuccess ? 'success' : 'error');
         apTextEl.innerHTML = '<strong>Auto-Port already executed:</strong> Completion ' + comp + ' | Comment ' + comment;
+        if (response.retry && response.retry.active) {
+          apTextEl.innerHTML += '<br><small style="color:#63b3ed">↻ Retrying every 5 min — attempt ' + (response.retry.attempts || 0) + (response.retry.nextAttemptAt ? ', next at ' + new Date(response.retry.nextAttemptAt).toLocaleTimeString() : '') + '</small>';
+        } else if (response.retry && response.retry.permanent) {
+          apTextEl.innerHTML += '<br><small style="color:#fc8181">❌ Permanent failure — manual action needed in PortingAdmin</small>';
+        }
         if (response.log && response.log.length) {
           apTextEl.innerHTML += '<br><small style="color:#a0aec0">' + response.log.join(' → ') + '</small>';
         }

@@ -80,6 +80,10 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     const srId = alarm.name.replace('autoport_', '');
     executeAutoPort(srId);
   }
+  if (alarm.name.startsWith('autoretry_')) {
+    const srId = alarm.name.replace('autoretry_', '');
+    runAutoPortRetry(srId);
+  }
 });
 
 // ─── Sign in ─────────────────────────────────────────────────────────────────
@@ -720,6 +724,7 @@ async function scheduleAutoPort(orderData, eventId, eventLink) {
 async function cancelAutoPort(srId) {
   try {
     await chrome.alarms.clear('autoport_' + srId);
+    chrome.alarms.clear('autoretry_' + srId);
     const { autoPortJobs } = await chrome.storage.local.get('autoPortJobs');
     const jobs = autoPortJobs || {};
     if (jobs[srId]) {
@@ -800,6 +805,14 @@ async function checkAutoPortStatus(srId) {
       completionSuccess: job.completionSuccess || null,
       commentSuccess: job.commentSuccess || null,
       error: job.error || null,
+      retry: job.retry ? {
+        active: !!job.retry.active,
+        permanent: !!job.retry.permanent,
+        attempts: job.retry.attempts || 0,
+        lastError: job.retry.lastError || null,
+        nextAttemptAt: job.retry.nextAttemptAt || null,
+        failedSteps: job.retry.failedSteps || null
+      } : null,
       log: job.log || []
     };
   } catch (e) {
@@ -858,143 +871,314 @@ async function executeAutoPort(srId, cachedOrderData) {
     return { error: 'No API key configured' };
   }
 
-  let orderId = orderData._uuids?.portRequestId || orderData.orderId || '';
-  const subRequestId = orderData._uuids?.subRequestId || orderData.subRequestId || '';
-  const phoneNumbers = orderData.phoneNumbers || [];
-  let parentSupportKey = orderData.parentSupportKey || orderData.parent_support_key || '';
-  // V1 and V2 use separate IDs for the parent/port_request. Completion is V1-only;
-  // comments stay on V2. Keep v1PortRequestId distinct from orderId (V2).
-  let v1PortRequestId = '';
-  let completionSuccess = false;
-  let commentSuccess = false;
   let log = [];
+  const result = await runAutoPortSteps(srId, orderData, telnyxApiKey, log);
 
-  // Resolve the V1 port_request_id for the completion endpoint.
-  // The completion route is V1-only (/porting/v1/): its parent id differs from the
-  // V2 order id, while sub_request_id is shared across V1/V2.
-  // Bridge: V2 parent_support_key (pr_xxx) → V1 search → filter by support_key → V1 id.
-  if (orderId && subRequestId) {
-    try {
-      if (!parentSupportKey && srId) {
-        const fresh = await fetchOrderViaAPI(srId, telnyxApiKey);
-        if (fresh && fresh.parentSupportKey) parentSupportKey = fresh.parentSupportKey;
-      }
-      if (parentSupportKey) {
-        log.push('Resolving V1 port_request_id via ' + parentSupportKey);
-        const v1SearchUrl = 'https://' + INTERNAL_HOST + '/porting/v1/port_requests?search=' + encodeURIComponent(parentSupportKey);
-        const v1Resp = await fetch(v1SearchUrl, { headers: { 'Authorization': 'Bearer ' + telnyxApiKey } });
-        if (v1Resp.ok) {
-          const v1List = await v1Resp.json();
-          const match = Array.isArray(v1List) ? v1List.find(p => p.support_key === parentSupportKey) : null;
-          if (match && match.id) {
-            v1PortRequestId = match.id;
-            log.push('V1 port_request_id: ' + v1PortRequestId);
-          } else {
-            log.push('V1 parent lookup: no match for ' + parentSupportKey);
-          }
-        } else {
-          log.push('V1 parent lookup HTTP ' + v1Resp.status);
-        }
-      } else {
-        log.push('No parent_support_key — completion will fall back to order id');
-      }
-    } catch (e) {
-      log.push('V1 parent lookup error: ' + e.message);
-    }
-  }
-
-  // ─── Step 1: Trigger port via /completion (api-internal.telnyx.com) ─────────────────────
-  // POST /porting/v1/port_requests/{parent_order_id}/sub_requests/{sub_request_id}/completion
-  // Auth: Bearer API key (confirmed by Patrick — standard TELNYX_API_KEY, no impersonation)
-  // Body: {} (never leave comments in the body)
-  // Same route as the "Mark as Ported" button in PortingAdmin UI
-  log.push('Step 1: Trigger port (foc_date)');
-  // Use V1 id for completion; fall back to orderId only if V1 lookup failed.
-  const compParentId = v1PortRequestId || orderId;
-  if (compParentId && subRequestId) {
-    const compUrl = 'https://' + INTERNAL_HOST + '/porting/v1/port_requests/' + compParentId + '/sub_requests/' + subRequestId + '/completion';
-    log.push('POST ' + compUrl);
-    try {
-      const resp = await fetch(compUrl, {
-        method: 'POST',
-        headers: {
-          'Authorization': 'Bearer ' + telnyxApiKey,
-          'Content-Type': 'application/json'
-        },
-        body: '{}'
-      });
-      log.push('HTTP ' + resp.status);
-      console.log('[Auto-Port] Completion POST →', resp.status, compUrl);
-      if (resp.ok || resp.status === 204) {
-        completionSuccess = true;
-        log.push('OK Port triggered');
-      } else {
-        const text = await resp.text();
-        console.log('[Auto-Port] Completion response body:', text);
-        log.push('Response: ' + text.substring(0, 300));
-      }
-    } catch (e) {
-      console.log('[Auto-Port] Completion fetch error:', e.message);
-      log.push('Completion fetch error: ' + e.message);
-    }
-  } else {
-    log.push('Missing v1PortRequestId or subRequestId — skipping completion');
-  }
-
-  // ─── Step 2: Post Comment ──────────────────────────────────────────────────
-  log.push('Step 2: Post Comment');
-  if (orderId) {
-    const focComment = orderData.comment || orderData.fullComment || '';
-    let hoursText = 'up to 3 hours';
-    const durMatch = focComment.match(/(\d+)\s*(hour|hr|minute|min)/i);
-    if (durMatch) {
-      const num = parseInt(durMatch[1]);
-      const unit = durMatch[2].toLowerCase();
-      if (unit.startsWith('min')) hoursText = num + ' minute' + (num > 1 ? 's' : '');
-      else hoursText = num + ' hour' + (num > 1 ? 's' : '');
-    }
-
-    const commentBody = 'Hi there,\n\n'
-      + 'This port request has now been triggered with the losing communications provider. The status of this port will change to ported.\n\n'
-      + 'However, please allow up to ' + hoursText + ' from now, for the routing to fully update.\n\n'
-      + 'Please wait until you receive our confirmation via the comments of the request before confirming port completion with the end-user.\n\n'
-      + "We'd love to hear your feedback on this order—your input helps us improve and serve you better. Please take a moment to fill out our quick survey!\n\n"
-      + 'Best,\n'
-      + 'Telnyx Porting Team';
-
-    try {
-      const resp = await fetch(API_BASE + '/private/v2/porting_orders/' + orderId + '/comments', {
-        method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + telnyxApiKey, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ body: commentBody })
-      });
-      log.push('Comment POST HTTP ' + resp.status);
-      if (resp.ok) {
-        commentSuccess = true;
-        log.push('OK Comment posted');
-      } else {
-        const text = await resp.text();
-        log.push('Response: ' + text.substring(0, 300));
-      }
-    } catch (e) {
-      log.push('Comment error: ' + e.message);
-    }
-  } else {
-    log.push('Missing orderId — skipping comment');
-  }
-
-  // ─── Update job status ─────────────────────────────────────────────────────
+  // ─── Update job status + retry state ─────────────────────────────────────
   const { autoPortJobs } = await chrome.storage.local.get('autoPortJobs');
   const jobs = autoPortJobs || {};
-  if (jobs[srId]) {
-    jobs[srId].executed = true;
-    jobs[srId].executedAt = new Date().toISOString();
-    jobs[srId].completionSuccess = completionSuccess;
-    jobs[srId].commentSuccess = commentSuccess;
-    jobs[srId].log = log;
-    await chrome.storage.local.set({ autoPortJobs: jobs });
+  const job = jobs[srId] || { srId: srId, orderData: orderData };
+  jobs[srId] = job;
+  job.executed = true;
+  job.executedAt = new Date().toISOString();
+  job.completionSuccess = result.completionSuccess;
+  job.commentSuccess = result.commentSuccess;
+  job.log = log;
+
+  const failed = result.completionFailed || result.commentFailed;
+  if (failed) {
+    await scheduleRetry(srId, job, result);
+  } else {
+    await clearRetryState(srId, job);
   }
 
+  notifyLocal(srId, result.completionSuccess, result.commentSuccess, orderData);
+  await maybeSlackNotify(srId, job, result, 'initial');
+  await chrome.storage.local.set({ autoPortJobs: jobs });
+
+  const status = result.completionSuccess && result.commentSuccess ? 'OK' : (result.completionSuccess || result.commentSuccess ? 'PARTIAL' : 'FAIL');
+  console.log('[Auto-Port] Done for', srId, 'comp=' + result.completionSuccess, 'comment=' + result.commentSuccess, status);
+  return {
+    completionSuccess: result.completionSuccess,
+    commentSuccess: result.commentSuccess,
+    retryScheduled: !!(job.retry && job.retry.active),
+    alreadyPorted: result.alreadyPorted,
+    log: log
+  };
+}
+
+// ─── Auto-Port: shared step helpers (initial run + 5-min retries) ───────────
+
+const RETRY_ALARM_PREFIX = 'autoretry_';
+const RETRY_PERIOD_MIN = 5;
+
+// Transient HTTP statuses worth retrying; everything else in the 4xx range is
+// deterministic and should alert instead of looping.
+function isRetryableStatus(status) {
+  return status === 408 || status === 425 || status === 429 || (status >= 500 && status <= 599);
+}
+
+// Resolve the V1 port_request_id needed by the completion route.
+// Completion is V1-only: its parent id differs from the V2 order id, while
+// sub_request_id is shared across V1/V2. Bridge: V2 parent_support_key (pr_xxx)
+// → V1 search → match support_key → V1 id.
+// NOTE: never fall back to the V2 order id — the V1 route can't resolve it and
+// returns 404 "Page not found" (Nov-10 sr_e555d1 incident).
+async function resolveV1ParentId(orderData, srId, telnyxApiKey) {
+  const log = [];
+  let parentSupportKey = orderData.parentSupportKey || orderData.parent_support_key || '';
+  if (!parentSupportKey && srId) {
+    try {
+      const fresh = await fetchOrderViaAPI(srId, telnyxApiKey);
+      if (fresh && fresh.parentSupportKey) {
+        parentSupportKey = fresh.parentSupportKey;
+        orderData.parentSupportKey = parentSupportKey;
+      }
+    } catch (e) {
+      log.push('parent_support_key refresh failed: ' + e.message);
+    }
+  }
+  if (!parentSupportKey) {
+    log.push('No parent_support_key — cannot resolve V1 parent id');
+    return { id: null, log, error: 'no parent_support_key' };
+  }
+  log.push('Resolving V1 parent via ' + parentSupportKey);
+  try {
+    const v1SearchUrl = 'https://' + INTERNAL_HOST + '/porting/v1/port_requests?search=' + encodeURIComponent(parentSupportKey);
+    const v1Resp = await fetch(v1SearchUrl, { headers: { 'Authorization': '***' + telnyxApiKey } });
+    if (!v1Resp.ok) {
+      log.push('V1 parent lookup HTTP ' + v1Resp.status);
+      return { id: null, log, error: 'HTTP ' + v1Resp.status };
+    }
+    const v1List = await v1Resp.json();
+    const match = Array.isArray(v1List) ? v1List.find(p => p.support_key === parentSupportKey) : null;
+    if (match && match.id) {
+      log.push('V1 parent: ' + match.id);
+      return { id: match.id, log };
+    }
+    log.push('V1 parent lookup: no match for ' + parentSupportKey);
+    return { id: null, log, error: 'no V1 match' };
+  } catch (e) {
+    log.push('V1 parent lookup error: ' + e.message);
+    return { id: null, log, error: e.message };
+  }
+}
+
+// POST /porting/v1/port_requests/{v1ParentId}/sub_requests/{subRequestId}/completion
+async function attemptCompletion(v1ParentId, subRequestId, telnyxApiKey) {
+  if (!v1ParentId || !subRequestId) {
+    return { success: false, error: 'missing V1 parent or sub_request id', retryable: true };
+  }
+  const compUrl = 'https://' + INTERNAL_HOST + '/porting/v1/port_requests/' + v1ParentId + '/sub_requests/' + subRequestId + '/completion';
+  try {
+    const resp = await fetch(compUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': '***' + telnyxApiKey,
+        'Content-Type': 'application/json'
+      },
+      body: '{}'
+    });
+    console.log('[Auto-Port] Completion POST →', resp.status, compUrl);
+    if (resp.ok || resp.status === 204) return { success: true, httpStatus: resp.status };
+    const text = await resp.text();
+    return { success: false, httpStatus: resp.status, body: text.substring(0, 300), retryable: isRetryableStatus(resp.status) };
+  } catch (e) {
+    // fetch-level errors ("Failed to fetch") are transient network issues
+    return { success: false, error: e.message, retryable: true };
+  }
+}
+
+// Post the customer-facing "port triggered" comment (V2 Porting Query API)
+async function attemptComment(orderId, commentBody, telnyxApiKey) {
+  if (!orderId) return { success: false, error: 'missing orderId', retryable: true };
+  try {
+    const resp = await fetch(API_BASE + '/private/v2/porting_orders/' + orderId + '/comments', {
+      method: 'POST',
+      headers: { 'Authorization': '***' + telnyxApiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body: commentBody })
+    });
+    if (resp.ok) return { success: true, httpStatus: resp.status };
+    const text = await resp.text();
+    return { success: false, httpStatus: resp.status, body: text.substring(0, 300), retryable: isRetryableStatus(resp.status) };
+  } catch (e) {
+    return { success: false, error: e.message, retryable: true };
+  }
+}
+
+function buildTriggerComment(focComment) {
+  let hoursText = 'up to 3 hours';
+  const durMatch = (focComment || '').match(/(\d+)\s*(hour|hr|minute|min)/i);
+  if (durMatch) {
+    const num = parseInt(durMatch[1]);
+    const unit = durMatch[2].toLowerCase();
+    if (unit.startsWith('min')) hoursText = num + ' minute' + (num > 1 ? 's' : '');
+    else hoursText = num + ' hour' + (num > 1 ? 's' : '');
+  }
+  return 'Hi there,\n\n'
+    + 'This port request has now been triggered with the losing communications provider. The status of this port will change to ported.\n\n'
+    + 'However, please allow up to ' + hoursText + ' from now, for the routing to fully update.\n\n'
+    + 'Please wait until you receive our confirmation via the comments of the request before confirming port completion with the end-user.\n\n'
+    + "We'd love to hear your feedback on this order—your input helps us improve and serve you better. Please take a moment to fill out our quick survey!\n\n"
+    + 'Best,\n'
+    + 'Telnyx Porting Team';
+}
+
+// True if the V2 order already shows ported (automation may complete before us)
+async function isOrderAlreadyPorted(srId, telnyxApiKey) {
+  if (!srId) return false;
+  try {
+    const resp = await fetch(API_BASE + '/private/v2/porting_orders?filter%5Bsupport_key%5D=' + encodeURIComponent(srId), {
+      headers: { 'Authorization': '***' + telnyxApiKey }
+    });
+    if (!resp.ok) return false;
+    const data = await resp.json();
+    const order = (data.data || [])[0];
+    return !!(order && order.status && order.status.value === 'ported');
+  } catch (e) {
+    return false;
+  }
+}
+
+// Run both steps; shared by the FOC alarm execution and the retry loop.
+async function runAutoPortSteps(srId, orderData, telnyxApiKey, log) {
+  const orderId = orderData._uuids?.portRequestId || orderData.orderId || '';
+  const subRequestId = orderData._uuids?.subRequestId || orderData.subRequestId || '';
+  const res = {
+    completionSuccess: false, completionFailed: false, completionRetryable: false, completionDetail: '',
+    commentSuccess: false, commentFailed: false, commentRetryable: false, commentDetail: '',
+    alreadyPorted: false
+  };
+
+  // ─── Step 1: Trigger port via /completion (V1) ─────────────────────────────
+  log.push('Step 1: Trigger port (foc_date)');
+  if (await isOrderAlreadyPorted(srId, telnyxApiKey)) {
+    res.alreadyPorted = true;
+    res.completionSuccess = true;
+    res.commentSuccess = true;
+    log.push('Order already ported — trigger + comment skipped');
+    return res;
+  }
+  const v1 = await resolveV1ParentId(orderData, srId, telnyxApiKey);
+  for (let i = 0; i < v1.log.length; i++) log.push(v1.log[i]);
+  if (!v1.id) {
+    res.completionFailed = true;
+    res.completionRetryable = true; // lookup failures are transient → retry
+    res.completionDetail = 'V1 parent unresolved: ' + (v1.error || 'unknown');
+    log.push('Completion not attempted — retry pending');
+  } else {
+    const comp = await attemptCompletion(v1.id, subRequestId, telnyxApiKey);
+    if (comp.success) {
+      res.completionSuccess = true;
+      log.push('OK Port triggered (HTTP ' + (comp.httpStatus || '2xx') + ')');
+    } else {
+      res.completionFailed = true;
+      res.completionRetryable = !!comp.retryable;
+      res.completionDetail = 'HTTP ' + (comp.httpStatus || '') + ' ' + (comp.body || comp.error || '');
+      log.push('Completion failed: ' + res.completionDetail);
+    }
+  }
+
+  // ─── Step 2: Post Comment (only after the trigger succeeded) ───────────────
+  log.push('Step 2: Post Comment');
+  if (res.completionSuccess) {
+    const comment = await attemptComment(orderId, buildTriggerComment(orderData.comment || orderData.fullComment || ''), telnyxApiKey);
+    if (comment.success) {
+      res.commentSuccess = true;
+      log.push('OK Comment posted');
+    } else {
+      res.commentFailed = true;
+      res.commentRetryable = !!comment.retryable;
+      res.commentDetail = 'HTTP ' + (comment.httpStatus || '') + ' ' + (comment.body || comment.error || '');
+      log.push('Comment failed: ' + res.commentDetail);
+    }
+  } else {
+    res.commentFailed = true;
+    res.commentRetryable = res.completionRetryable;
+    res.commentDetail = 'waiting on completion';
+    log.push('Comment held until trigger succeeds');
+  }
+  return res;
+}
+
+// ─── Auto-Port: 5-minute retry engine ───────────────────────────────────────
+
+async function scheduleRetry(srId, job, result) {
+  const failedSteps = [result.completionFailed ? 'Completion' : '', result.commentFailed ? 'Comment' : ''].filter(Boolean).join(' + ') || 'Auto-Port';
+  const permanent = result.completionFailed
+    ? !result.completionRetryable
+    : (result.commentFailed ? !result.commentRetryable : false);
+  const prev = job.retry || { attempts: 0 };
+  job.retry = {
+    active: !permanent,
+    permanent: permanent,
+    attempts: prev.attempts || 0,
+    lastError: [result.completionDetail, result.commentDetail].filter(Boolean).join(' | '),
+    lastAttemptAt: new Date().toISOString(),
+    failedSteps: failedSteps,
+    notifiedFailure: prev.notifiedFailure || false
+  };
+  if (!permanent) {
+    chrome.alarms.create(RETRY_ALARM_PREFIX + srId, { periodInMinutes: RETRY_PERIOD_MIN });
+    job.retry.nextAttemptAt = new Date(Date.now() + RETRY_PERIOD_MIN * 60000).toISOString();
+  } else {
+    chrome.alarms.clear(RETRY_ALARM_PREFIX + srId);
+  }
+}
+
+async function clearRetryState(srId, job) {
+  job.retry = Object.assign({}, job.retry || {}, { active: false, permanent: false, clearedAt: new Date().toISOString() });
+  chrome.alarms.clear(RETRY_ALARM_PREFIX + srId);
+}
+
+async function runAutoPortRetry(srId) {
+  const { autoPortJobs } = await chrome.storage.local.get('autoPortJobs');
+  const jobs = autoPortJobs || {};
+  const job = jobs[srId];
+  if (!job || !job.retry || (!job.retry.active && !job.retry.permanent)) {
+    chrome.alarms.clear(RETRY_ALARM_PREFIX + srId);
+    return;
+  }
+  if (job.retry.permanent) {
+    chrome.alarms.clear(RETRY_ALARM_PREFIX + srId);
+    return;
+  }
+  const { telnyxApiKey } = await chrome.storage.sync.get('telnyxApiKey');
+  if (!telnyxApiKey) {
+    console.error('[Auto-Port Retry] No API key');
+    return;
+  }
+
+  const log = [];
+  const result = await runAutoPortSteps(srId, job.orderData, telnyxApiKey, log);
+  job.retry.attempts = (job.retry.attempts || 0) + 1;
+  job.retry.lastAttemptAt = new Date().toISOString();
+  job.log = (job.log || []).concat(log).slice(-40);
+
+  const allDone = result.completionSuccess && result.commentSuccess;
+  const permanentNow = result.completionFailed
+    ? !result.completionRetryable
+    : (result.commentFailed ? !result.commentRetryable : false);
+
+  if (allDone) {
+    job.completionSuccess = true;
+    job.commentSuccess = true;
+    await clearRetryState(srId, job);
+  } else if (permanentNow) {
+    job.retry.active = false;
+    job.retry.permanent = true;
+    chrome.alarms.clear(RETRY_ALARM_PREFIX + srId);
+  } else {
+    job.retry.lastError = [result.completionDetail, result.commentDetail].filter(Boolean).join(' | ') || job.retry.lastError;
+    job.retry.nextAttemptAt = new Date(Date.now() + RETRY_PERIOD_MIN * 60000).toISOString();
+  }
+  await chrome.storage.local.set({ autoPortJobs: jobs });
+
+  notifyLocal(srId, result.completionSuccess, result.commentSuccess, job.orderData);
+  await maybeSlackNotify(srId, job, result, allDone ? 'recovered' : (permanentNow ? 'permanent' : 'retrying'));
+}
+
+function notifyLocal(srId, completionSuccess, commentSuccess, orderData) {
   const status = completionSuccess && commentSuccess ? 'OK' : (completionSuccess || commentSuccess ? 'PARTIAL' : 'FAIL');
   try {
     chrome.notifications?.create('autoport_' + srId, {
@@ -1004,7 +1188,73 @@ async function executeAutoPort(srId, cachedOrderData) {
       message: 'Completion: ' + (completionSuccess ? 'OK' : 'FAIL') + ' | Comment: ' + (commentSuccess ? 'OK' : 'FAIL') + '\nFOC: ' + (orderData.focDate || 'N/A')
     });
   } catch (e) {}
+}
 
-  console.log('[Auto-Port] Done for', srId, 'comp=' + completionSuccess, 'comment=' + commentSuccess);
-  return { completionSuccess: completionSuccess, commentSuccess: commentSuccess, log: log };
+// ─── Slack DM alerts via phenbot ─────────────────────────────────────────────
+
+async function sendSlackDm(text) {
+  try {
+    const { slackBotToken, slackUserId, slackDmChannel } = await chrome.storage.sync.get(['slackBotToken', 'slackUserId', 'slackDmChannel']);
+    if (!slackBotToken || (!slackUserId && !slackDmChannel)) return { skipped: true };
+    let channel = slackDmChannel;
+    if (!channel && slackUserId && slackUserId.indexOf('D') === 0) {
+      channel = slackUserId; // user pasted a DM channel id directly
+    }
+    if (!channel) {
+      const openResp = await fetch('https://slack.com/api/conversations.open', {
+        method: 'POST',
+        headers: { 'Authorization': '***' + slackBotToken, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ users: slackUserId })
+      });
+      const openData = await openResp.json();
+      if (!openData.ok || !openData.channel) return { error: openData.error || 'conversations.open failed' };
+      channel = openData.channel.id;
+      await chrome.storage.sync.set({ slackDmChannel: channel });
+    }
+    const resp = await fetch('https://slack.com/api/chat.postMessage', {
+      method: 'POST',
+      headers: { 'Authorization': '***' + slackBotToken, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ channel: channel, text: text })
+    });
+    const data = await resp.json();
+    if (!data.ok) {
+      if (data.error === 'channel_not_found' || data.error === 'is_archived') {
+        await chrome.storage.sync.remove('slackDmChannel');
+      }
+      return { error: data.error };
+    }
+    return { success: true };
+  } catch (e) {
+    return { error: e.message };
+  }
+}
+
+async function maybeSlackNotify(srId, job, result, phase) {
+  const r = job.retry || {};
+  const label = 'FOC Auto-Port — ' + srId;
+  try {
+    if (phase === 'initial') {
+      if (!(result.completionFailed || result.commentFailed)) {
+        if (result.alreadyPorted) {
+          await sendSlackDm('ℹ️ ' + label + ': order already ported before trigger time — nothing to do.');
+        } else {
+          await sendSlackDm('✅ ' + label + ' completed on first attempt: Completion ✅ Comment ✅');
+        }
+        return;
+      }
+      if (r.notifiedFailure) return;
+      job.retry = Object.assign({}, r, { notifiedFailure: true });
+      if (r.permanent) {
+        await sendSlackDm('❌ ' + label + ': ' + r.failedSteps + ' failed permanently (' + r.lastError + '). Manual action needed in PortingAdmin.');
+      } else {
+        await sendSlackDm('⚠️ ' + label + ': ' + r.failedSteps + ' failed (' + r.lastError + ')\n↻ Retrying every 5 min until it succeeds.');
+      }
+    } else if (phase === 'recovered') {
+      await sendSlackDm('✅ ' + label + ' succeeded after ' + (r.attempts || 0) + ' attempt' + ((r.attempts || 0) === 1 ? '' : 's') + ': Completion ✅ Comment ✅');
+    } else if (phase === 'permanent') {
+      await sendSlackDm('❌ ' + label + ': ' + (r.failedSteps || 'step') + ' failed permanently (' + (r.lastError || '') + '). Manual action needed in PortingAdmin.');
+    }
+  } catch (e) {
+    console.log('[Auto-Port] Slack notify error:', e.message);
+  }
 }
