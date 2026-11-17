@@ -945,7 +945,7 @@ async function resolveV1ParentId(orderData, srId, telnyxApiKey) {
   log.push('Resolving V1 parent via ' + parentSupportKey);
   try {
     const v1SearchUrl = 'https://' + INTERNAL_HOST + '/porting/v1/port_requests?search=' + encodeURIComponent(parentSupportKey);
-    const v1Resp = await fetch(v1SearchUrl, { headers: { 'Authorization': '***' + telnyxApiKey } });
+    const v1Resp = await fetch(v1SearchUrl, { headers: { 'Authorization': 'Bearer ' + telnyxApiKey } });
     if (!v1Resp.ok) {
       log.push('V1 parent lookup HTTP ' + v1Resp.status);
       return { id: null, log, error: 'HTTP ' + v1Resp.status };
@@ -974,7 +974,7 @@ async function attemptCompletion(v1ParentId, subRequestId, telnyxApiKey) {
     const resp = await fetch(compUrl, {
       method: 'POST',
       headers: {
-        'Authorization': '***' + telnyxApiKey,
+        'Authorization': 'Bearer ' + telnyxApiKey,
         'Content-Type': 'application/json'
       },
       body: '{}'
@@ -995,7 +995,7 @@ async function attemptComment(orderId, commentBody, telnyxApiKey) {
   try {
     const resp = await fetch(API_BASE + '/private/v2/porting_orders/' + orderId + '/comments', {
       method: 'POST',
-      headers: { 'Authorization': '***' + telnyxApiKey, 'Content-Type': 'application/json' },
+      headers: { 'Authorization': 'Bearer ' + telnyxApiKey, 'Content-Type': 'application/json' },
       body: JSON.stringify({ body: commentBody })
     });
     if (resp.ok) return { success: true, httpStatus: resp.status };
@@ -1029,7 +1029,7 @@ async function isOrderAlreadyPorted(srId, telnyxApiKey) {
   if (!srId) return false;
   try {
     const resp = await fetch(API_BASE + '/private/v2/porting_orders?filter%5Bsupport_key%5D=' + encodeURIComponent(srId), {
-      headers: { 'Authorization': '***' + telnyxApiKey }
+      headers: { 'Authorization': 'Bearer ' + telnyxApiKey }
     });
     if (!resp.ok) return false;
     const data = await resp.json();
@@ -1190,30 +1190,18 @@ function notifyLocal(srId, completionSuccess, commentSuccess, orderData) {
   } catch (e) {}
 }
 
-// ─── Slack DM alerts via phenbot ─────────────────────────────────────────────
+// ─── Slack alerts -> #phenbot-notifications via phenbot ─────────────────────────────────────────────
+
+const SLACK_ALERT_CHANNEL_DEFAULT = 'C0CJEMHA1GW';
 
 async function sendSlackDm(text) {
   try {
-    const { slackBotToken, slackUserId, slackDmChannel } = await chrome.storage.sync.get(['slackBotToken', 'slackUserId', 'slackDmChannel']);
-    if (!slackBotToken || (!slackUserId && !slackDmChannel)) return { skipped: true };
-    let channel = slackDmChannel;
-    if (!channel && slackUserId && slackUserId.indexOf('D') === 0) {
-      channel = slackUserId; // user pasted a DM channel id directly
-    }
-    if (!channel) {
-      const openResp = await fetch('https://slack.com/api/conversations.open', {
-        method: 'POST',
-        headers: { 'Authorization': '***' + slackBotToken, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ users: slackUserId })
-      });
-      const openData = await openResp.json();
-      if (!openData.ok || !openData.channel) return { error: openData.error || 'conversations.open failed' };
-      channel = openData.channel.id;
-      await chrome.storage.sync.set({ slackDmChannel: channel });
-    }
+    const { slackBotToken, slackChannelId } = await chrome.storage.sync.get(['slackBotToken', 'slackChannelId']);
+    const channel = slackChannelId || SLACK_ALERT_CHANNEL_DEFAULT; // #phenbot-notifications (owner policy 2026-11-17)
+    if (!slackBotToken || !channel) return { skipped: true };
     const resp = await fetch('https://slack.com/api/chat.postMessage', {
       method: 'POST',
-      headers: { 'Authorization': '***' + slackBotToken, 'Content-Type': 'application/json' },
+      headers: { 'Authorization': 'Bearer ' + slackBotToken, 'Content-Type': 'application/json' },
       body: JSON.stringify({ channel: channel, text: text })
     });
     const data = await resp.json();
@@ -1232,6 +1220,9 @@ async function sendSlackDm(text) {
 async function maybeSlackNotify(srId, job, result, phase) {
   const r = job.retry || {};
   const label = 'FOC Auto-Port — ' + srId;
+  const oid = (job.orderData && (job.orderData._uuids?.portRequestId || job.orderData.orderId)) || '';
+  const at = new Date().toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+  const logTail = (job.log && job.log.length) ? '\nFindings: ' + job.log.slice(-3).join(' | ') : '';
   try {
     if (phase === 'initial') {
       if (!(result.completionFailed || result.commentFailed)) {
@@ -1245,14 +1236,14 @@ async function maybeSlackNotify(srId, job, result, phase) {
       if (r.notifiedFailure) return;
       job.retry = Object.assign({}, r, { notifiedFailure: true });
       if (r.permanent) {
-        await sendSlackDm('❌ ' + label + ': ' + r.failedSteps + ' failed permanently (' + r.lastError + '). Manual action needed in PortingAdmin.');
+        await sendSlackDm('❌ ' + label + (oid ? ' (order ' + oid + ')' : '') + ': ' + r.failedSteps + ' failed permanently. Findings: ' + (r.lastError || 'unknown') + '.' + logTail + '\n⚠️ Manual action needed in PortingAdmin. [' + at + ']');
       } else {
-        await sendSlackDm('⚠️ ' + label + ': ' + r.failedSteps + ' failed (' + r.lastError + ')\n↻ Retrying every 5 min until it succeeds.');
+        await sendSlackDm('⚠️ ' + label + (oid ? ' (order ' + oid + ')' : '') + ': ' + r.failedSteps + ' failed. Findings: ' + (r.lastError || 'unknown') + '.' + logTail + '\n↻ Retrying every 5 min until it succeeds. [' + at + ']');
       }
     } else if (phase === 'recovered') {
       await sendSlackDm('✅ ' + label + ' succeeded after ' + (r.attempts || 0) + ' attempt' + ((r.attempts || 0) === 1 ? '' : 's') + ': Completion ✅ Comment ✅');
     } else if (phase === 'permanent') {
-      await sendSlackDm('❌ ' + label + ': ' + (r.failedSteps || 'step') + ' failed permanently (' + (r.lastError || '') + '). Manual action needed in PortingAdmin.');
+      await sendSlackDm('❌ ' + label + (oid ? ' (order ' + oid + ')' : '') + ': ' + (r.failedSteps || 'step') + ' failed permanently. Findings: ' + (r.lastError || '') + '.' + logTail + '\n⚠️ Manual action needed in PortingAdmin. [' + at + ']');
     }
   } catch (e) {
     console.log('[Auto-Port] Slack notify error:', e.message);
