@@ -1,4 +1,4 @@
-// Content script: runs on portingadmin.telnyx.com
+// Content script: runs on portingadmin.telnyx.com (prod) + portingadmindev.telnyx.com (dev)
 // Extracts FOC order data from the current page and URL
 
 function extractUUIDsFromURL() {
@@ -181,17 +181,25 @@ function extractFromDOM() {
 
 // Fetch order data using UUIDs via internal API (same-origin cookies)
 async function fetchOrderByUUIDs(portRequestId, subRequestId) {
+  // Use the dev internal API when running on the dev PortingAdmin site
+  const isDevHost = window.location.hostname.startsWith('portingadmindev');
+  const internalBase = isDevHost ? 'https://apidev-internal.telnyx.com' : 'https://api-internal.telnyx.com';
+  const { telnyxApiKey } = await chrome.storage.sync.get('telnyxApiKey');
   try {
-    const url = `https://api-internal.telnyx.com/porting/v1/port_requests/${portRequestId}/sub_requests/${subRequestId}?include_phone_numbers=true`;
-    const resp = await fetch(url, { credentials: 'include', mode: 'cors' });
+    const url = `${internalBase}/porting/v1/port_requests/${portRequestId}/sub_requests/${subRequestId}?include_phone_numbers=true`;
+    const resp = await fetch(url, {
+      headers: { 'Authorization': 'Bearer ' + telnyxApiKey }
+    });
     if (resp.ok) {
       const data = await resp.json();
       return { type: 'sub', data };
     }
   } catch (e) {}
   try {
-    const url2 = `https://api-internal.telnyx.com/porting/v1/port_requests/${portRequestId}?include_phone_numbers=false`;
-    const resp2 = await fetch(url2, { credentials: 'include', mode: 'cors' });
+    const url2 = `${internalBase}/porting/v1/port_requests/${portRequestId}?include_phone_numbers=false`;
+    const resp2 = await fetch(url2, {
+      headers: { 'Authorization': 'Bearer ' + telnyxApiKey }
+    });
     if (resp2.ok) {
       const data2 = await resp2.json();
       return { type: 'port', data: data2 };
@@ -220,7 +228,7 @@ function normalizeAPIResponse(apiResult) {
     ? (focComment?.body || focComment?.text || focComment)
     : (allComments[0]?.body || allComments[0]?.text || allComments[0] || '');
   const srId = attr.sr_number || attr.reference || attr.sr_id || d.id;
-  return { srId, country: country || null, focDate: focDate || null, comment: comment || '' };
+  return { srId, country: country || null, focDate: focDate || null, comment: comment || '', _uuids: { portRequestId: null, subRequestId: null } };
 }
 
 // Read order from the current page (API + DOM)
@@ -234,6 +242,7 @@ async function readOrderFromCurrentPage(requestedSrId) {
       const apiData = await fetchOrderByUUIDs(uuids.portRequestId, uuids.subRequestId);
       if (apiData) {
         result = normalizeAPIResponse(apiData);
+        if (result) result._uuids = { portRequestId: uuids.portRequestId, subRequestId: uuids.subRequestId };
       }
     } catch (e) {}
   }
@@ -261,7 +270,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'FETCH_ORDER_FROM_PAGE') {
     (async () => {
       try {
-        if (!window.location.href.includes('portingadmin.telnyx.com')) {
+        const onPortingAdmin = window.location.href.includes('portingadmin.telnyx.com') ||
+                               window.location.href.includes('portingadmindev.telnyx.com');
+        if (!onPortingAdmin) {
           sendResponse({ error: 'Not on PortingAdmin page' });
           return;
         }
