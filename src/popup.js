@@ -53,15 +53,17 @@ if (settingsLink) {
       settingsPanel.classList.toggle('visible');
       // Load current settings when panel opens
       if (settingsPanel.classList.contains('visible')) {
-        chrome.storage.sync.get(['telnyxApiKey', 'userEmail', 'dateFormat', 'slackBotToken', 'slackUserId'], (data) => {
+        chrome.storage.sync.get(['telnyxApiKey', 'userEmail', 'dateFormat', 'slackBotToken', 'slackChannelId', 'slackUserId'], (data) => {
           if (data && data.telnyxApiKey && apiKeyInput) {
             apiKeyInput.value = data.telnyxApiKey;
           }
           if (data && data.slackBotToken && slackTokenInput) {
             slackTokenInput.value = data.slackBotToken;
           }
-          if (data && data.slackUserId && slackUserInput) {
-            slackUserInput.value = data.slackUserId;
+          if (data && data.slackChannelId && slackUserInput) {
+            slackUserInput.value = data.slackChannelId;
+          } else if (data && data.slackUserId && slackUserInput && String(data.slackUserId).indexOf('C') === 0) {
+            slackUserInput.value = data.slackUserId; // v1.3.0 migration: channel id stored as user id
           }
           if (data && data.userEmail && emailInput) {
             emailInput.value = data.userEmail;
@@ -103,7 +105,8 @@ if (saveSettingsBtn) {
     const slackUser = slackUserInput ? slackUserInput.value.trim() : '';
     const updates = { telnyxApiKey: key, userEmail: email };
     if (slackToken) updates.slackBotToken = slackToken;
-    if (slackUser) updates.slackUserId = slackUser;
+    if (slackChannel) updates.slackChannelId = slackChannel;
+    updates.slackUserId = slackChannel;
     chrome.storage.sync.set(updates);
     if (slackToken) chrome.storage.sync.remove('slackDmChannel');
 
